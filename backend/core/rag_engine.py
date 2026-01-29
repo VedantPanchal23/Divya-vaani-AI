@@ -29,8 +29,26 @@ def get_embedder():
         from sentence_transformers import SentenceTransformer
         logger.info(f"Loading {settings.EMBEDDING_MODEL}...")
         _embedder = SentenceTransformer(settings.EMBEDDING_MODEL)
-        logger.info("Embedder loaded")
+        logger.info("✅ Embedder loaded")
     return _embedder
+
+
+def _embed_text(texts: list, is_query: bool = False) -> np.ndarray:
+    """
+    Embed texts with proper prefix for E5 models.
+    E5 models require 'query: ' prefix for queries and 'passage: ' for documents.
+    """
+    embedder = get_embedder()
+    
+    # Check if using E5 model (requires prefixes)
+    is_e5 = "e5" in settings.EMBEDDING_MODEL.lower()
+    
+    if is_e5:
+        prefix = "query: " if is_query else "passage: "
+        texts = [prefix + t for t in texts]
+    
+    embeddings = embedder.encode(texts, convert_to_numpy=True)
+    return _normalize(embeddings.astype("float32"))
 
 
 def _normalize(vectors: np.ndarray) -> np.ndarray:
@@ -48,13 +66,11 @@ def index_transcript(transcript: Transcript):
     if not transcript.chunks:
         return
     
-    embedder = get_embedder()
     _load_transcript_index()
     
-    # Embed chunks
+    # Embed chunks (as passages, not queries)
     texts = [c.text for c in transcript.chunks]
-    embeddings = embedder.encode(texts, convert_to_numpy=True)
-    embeddings = _normalize(embeddings.astype("float32"))
+    embeddings = _embed_text(texts, is_query=False)
     
     # Add to index
     _transcript_index.add(embeddings)
@@ -83,10 +99,8 @@ def search_transcripts(query: str, transcript_id: str = None, top_k: int = 5) ->
     if _transcript_index.ntotal == 0:
         return []
     
-    # Embed query
-    embedder = get_embedder()
-    q_emb = embedder.encode([query], convert_to_numpy=True)
-    q_emb = _normalize(q_emb.astype("float32"))
+    # Embed query (with query prefix for E5)
+    q_emb = _embed_text([query], is_query=True)
     
     # Search
     k = min(top_k * 3, _transcript_index.ntotal)
@@ -189,11 +203,9 @@ def load_gita():
         _gita_index = faiss.IndexFlatIP(settings.EMBEDDING_DIM)
         return
     
-    # Create embeddings
-    embedder = get_embedder()
+    # Create embeddings (as passages)
     texts = [f"{v['hindi_meaning']} {v['english_meaning']}" for v in _gita_verses]
-    embeddings = embedder.encode(texts, convert_to_numpy=True)
-    embeddings = _normalize(embeddings.astype("float32"))
+    embeddings = _embed_text(texts, is_query=False)
     
     # Create index
     _gita_index = faiss.IndexFlatIP(settings.EMBEDDING_DIM)
@@ -226,10 +238,8 @@ def search_gita(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
     if _gita_index is None or _gita_index.ntotal == 0:
         return []
     
-    # Embed query
-    embedder = get_embedder()
-    q_emb = embedder.encode([query], convert_to_numpy=True)
-    q_emb = _normalize(q_emb.astype("float32"))
+    # Embed query (with query prefix for E5)
+    q_emb = _embed_text([query], is_query=True)
     
     # Search
     k = min(top_k, _gita_index.ntotal)

@@ -39,7 +39,7 @@ STYLE:
 
 
 async def generate_answer(question: str, context: str, source_type, language: str = "hi") -> str:
-    """Generate answer from context using Groq."""
+    """Generate answer from context using Groq (fast model for low latency)."""
     client = get_groq_client()
     
     lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
@@ -52,8 +52,11 @@ QUESTION: {question}
 {lang_instruction}
 Answer based ONLY on the above context. Cite the source."""
 
+    # Use fast model for Q&A (lower latency)
+    model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
+    
     response = await client.chat.completions.create(
-        model=settings.LLM_MODEL,
+        model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
@@ -66,7 +69,7 @@ Answer based ONLY on the above context. Cite the source."""
 
 
 async def generate_summary(text: str, language: str = "hi") -> str:
-    """Generate summary using Groq."""
+    """Generate summary using Groq (quality model for better output)."""
     lang = "Hindi (Devanagari script)" if language == "hi" else "English"
     
     prompt = f"""Summarize this spiritual discourse in {lang}.
@@ -79,6 +82,8 @@ TRANSCRIPT:
 {text[:12000]}"""
 
     client = get_groq_client()
+    
+    # Use quality model for summaries (output quality matters more than speed)
     response = await client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[
@@ -93,7 +98,7 @@ TRANSCRIPT:
 
 
 async def generate_explanation(text: str, language: str = "hi") -> str:
-    """Generate detailed explanation using Groq."""
+    """Generate detailed explanation using Groq (quality model)."""
     lang = "Hindi (Devanagari script)" if language == "hi" else "English"
     
     prompt = f"""Analyze this spiritual discourse and explain its deeper purpose in {lang}.
@@ -110,6 +115,8 @@ TRANSCRIPT:
 {text[:12000]}"""
 
     client = get_groq_client()
+    
+    # Use quality model for explanations
     response = await client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[

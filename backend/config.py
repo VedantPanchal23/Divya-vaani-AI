@@ -30,7 +30,8 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     
     # LLM Settings
-    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_MODEL: str = "llama-3.3-70b-versatile"  # For summaries/explanations (quality)
+    LLM_MODEL_FAST: str = "llama-3.1-8b-instant"  # For Q&A (speed) - ~5x faster
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2000
     
@@ -73,11 +74,11 @@ class Settings(BaseSettings):
         path.mkdir(parents=True, exist_ok=True)
         return path
     
-    # RAG Settings - Using faster multilingual model
-    EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # RAG Settings - Using E5 multilingual (best for retrieval)
+    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"  # Best for Hindi+English retrieval
     EMBEDDING_DIM: int = 384  # Dimension for this model
     TOP_K: int = 5
-    SIMILARITY_THRESHOLD: float = 0.5  # Lower threshold for 384-dim model
+    SIMILARITY_THRESHOLD: float = 0.6  # E5 model produces higher quality scores
     
     # Transcription Enhancement Settings
     PARALLEL_TRANSCRIPTION: bool = True  # Process chunks in parallel for speed
