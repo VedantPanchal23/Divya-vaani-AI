@@ -47,8 +47,16 @@ pydub>=0.25.1,<1.0.0
 # ------------------------
 # Text-to-Speech (Optimized for Speed)
 # Edge TTS: PRIMARY - ~1s latency, supports Hindi/English
+# gTTS: FALLBACK - Google TTS for reliability
+# TTS (Coqui): VOICE CLONING - Clone speaker's voice
 # ------------------------
 edge-tts>=6.1.12,<7.0.0
+gTTS>=2.5.0,<3.0.0
+
+# Voice Cloning (Optional - install separately for voice cloning feature)
+# Requires ~4GB disk space for model download
+# Install with: pip install TTS
+# TTS>=0.22.0
 
 # ------------------------
 # Utilities

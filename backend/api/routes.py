@@ -104,9 +104,9 @@ async def _process_upload(file_id: str, file_path: Path, filename: str):
         summary_hi = await llm_engine.generate_summary(transcript.full_text, "hi")
         summary_en = await llm_engine.generate_summary(transcript.full_text, "en")
         
-        # Generate summary audio
-        summary_audio_hi = await tts_engine.generate_speech_async(summary_hi, "hi")
-        summary_audio_en = await tts_engine.generate_speech_async(summary_en, "en")
+        # Generate summary audio (use long speech for better voice cloning)
+        summary_audio_hi = await tts_engine.generate_long_speech_async(summary_hi, "hi")
+        summary_audio_en = await tts_engine.generate_long_speech_async(summary_en, "en")
         
         # Step 3: Generate Explanation
         _status[file_id]["step"] = "explaining"
@@ -116,9 +116,9 @@ async def _process_upload(file_id: str, file_path: Path, filename: str):
         explanation_hi = await llm_engine.generate_explanation(transcript.full_text, "hi")
         explanation_en = await llm_engine.generate_explanation(transcript.full_text, "en")
         
-        # Generate explanation audio
-        explanation_audio_hi = await tts_engine.generate_speech_async(explanation_hi, "hi")
-        explanation_audio_en = await tts_engine.generate_speech_async(explanation_en, "en")
+        # Generate explanation audio (use long speech for better voice cloning)
+        explanation_audio_hi = await tts_engine.generate_long_speech_async(explanation_hi, "hi")
+        explanation_audio_en = await tts_engine.generate_long_speech_async(explanation_en, "en")
         
         # Store results
         _status[file_id] = {
@@ -307,7 +307,7 @@ async def transcribe_voice_input(audio: UploadFile = File(...)):
 
 @router.post("/tts", response_model=TTSResponse)
 async def synthesize_speech(request: TTSRequest):
-    """Convert text to speech."""
+    """Convert text to speech (uses voice cloning if enabled)."""
     audio_url = await tts_engine.generate_speech_async(request.text, request.language)
     
     if not audio_url:
@@ -325,6 +325,57 @@ async def get_audio(filename: str):
     return FileResponse(path, media_type="audio/mpeg")
 
 
+# ========== Voice Cloning ==========
+
+@router.get("/voice-cloning/status")
+async def voice_cloning_status():
+    """Get status of voice cloning system."""
+    try:
+        from core.voice_cloner import get_voice_cloning_status, is_voice_cloning_available, REFERENCE_AUDIO_FILENAME
+        status = get_voice_cloning_status()
+        status["enabled"] = getattr(settings, 'USE_VOICE_CLONING', False)
+        status["required_file"] = REFERENCE_AUDIO_FILENAME
+        return status
+    except ImportError:
+        return {
+            "available": False,
+            "enabled": False,
+            "error": "Voice cloning module not found. Install with: pip install TTS",
+            "required_file": "maharaj_audio.mp3"
+        }
+
+
+@router.get("/voice-cloning/reference-files")
+async def list_reference_files():
+    """Get information about the designated reference audio file."""
+    try:
+        from core.voice_cloner import get_reference_audio_path, REFERENCE_AUDIO_FILENAME
+        
+        ref_path = get_reference_audio_path()
+        
+        if ref_path and ref_path.exists():
+            return {
+                "status": "found",
+                "required_file": REFERENCE_AUDIO_FILENAME,
+                "path": str(ref_path),
+                "size_mb": round(ref_path.stat().st_size / (1024 * 1024), 2),
+                "message": "Reference audio is ready for voice cloning"
+            }
+        else:
+            return {
+                "status": "not_found",
+                "required_file": REFERENCE_AUDIO_FILENAME,
+                "expected_location": "Input/maharaj_audio.mp3",
+                "message": f"Please place {REFERENCE_AUDIO_FILENAME} in the Input folder"
+            }
+    except ImportError:
+        return {
+            "status": "error",
+            "required_file": "maharaj_audio.mp3",
+            "message": "Voice cloning module not available"
+        }
+
+
 # ========== Health Check ==========
 
 @router.get("/health")
@@ -333,5 +384,6 @@ async def health_check():
     return {
         "status": "healthy",
         "app": settings.APP_NAME,
-        "version": settings.APP_VERSION
+        "version": settings.APP_VERSION,
+        "voice_cloning_enabled": getattr(settings, 'USE_VOICE_CLONING', False)
     }

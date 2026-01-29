@@ -1,6 +1,7 @@
 """
 Divya Vaani AI - LLM Engine
-Uses Groq for ALL LLM tasks (fast + reliable).
+Uses Gemini for heavy tasks (summary, explanation) to avoid Groq rate limits.
+Uses Groq for fast Q&A responses.
 """
 import logging
 from groq import AsyncGroq
@@ -10,15 +11,32 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 _groq_client = None
+_gemini_model = None
 
 
 def get_groq_client() -> AsyncGroq:
-    """Get Groq client - used for all LLM tasks."""
+    """Get Groq client - used for fast Q&A."""
     global _groq_client
     if _groq_client is None:
         _groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
         logger.info("✅ Groq client initialized")
     return _groq_client
+
+
+def get_gemini_model():
+    """Get Gemini model - used for summaries and explanations."""
+    global _gemini_model
+    if _gemini_model is None:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            # Use gemini-1.5-flash-latest which has free tier
+            _gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            logger.info("✅ Gemini model initialized (gemini-1.5-flash-latest)")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Gemini: {e}")
+            return None
+    return _gemini_model
 
 
 # System prompts
@@ -69,7 +87,7 @@ Answer based ONLY on the above context. Cite the source."""
 
 
 async def generate_summary(text: str, language: str = "hi") -> str:
-    """Generate summary using Groq (quality model for better output)."""
+    """Generate summary using Gemini (to avoid Groq rate limits)."""
     lang = "Hindi (Devanagari script)" if language == "hi" else "English"
     
     prompt = f"""Summarize this spiritual discourse in {lang}.
@@ -79,11 +97,25 @@ Provide:
 2. 3-5 key teachings as bullet points
 
 TRANSCRIPT:
-{text[:12000]}"""
+{text[:15000]}"""
 
-    client = get_groq_client()
+    # Try Gemini first (no rate limits like Groq)
+    gemini = get_gemini_model()
+    if gemini:
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, 
+                lambda: gemini.generate_content(prompt)
+            )
+            logger.info(f"✅ Summary generated with Gemini ({language})")
+            return response.text
+        except Exception as e:
+            logger.warning(f"Gemini failed, falling back to Groq: {e}")
     
-    # Use quality model for summaries (output quality matters more than speed)
+    # Fallback to Groq
+    client = get_groq_client()
     response = await client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[
@@ -98,7 +130,7 @@ TRANSCRIPT:
 
 
 async def generate_explanation(text: str, language: str = "hi") -> str:
-    """Generate detailed explanation using Groq (quality model)."""
+    """Generate detailed explanation using Gemini (to avoid Groq rate limits)."""
     lang = "Hindi (Devanagari script)" if language == "hi" else "English"
     
     prompt = f"""Analyze this spiritual discourse and explain its deeper purpose in {lang}.
@@ -112,11 +144,25 @@ Cover:
 Keep the tone spiritual and respectful.
 
 TRANSCRIPT:
-{text[:12000]}"""
+{text[:15000]}"""
 
-    client = get_groq_client()
+    # Try Gemini first (no rate limits like Groq)
+    gemini = get_gemini_model()
+    if gemini:
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, 
+                lambda: gemini.generate_content(prompt)
+            )
+            logger.info(f"✅ Explanation generated with Gemini ({language})")
+            return response.text
+        except Exception as e:
+            logger.warning(f"Gemini failed, falling back to Groq: {e}")
     
-    # Use quality model for explanations
+    # Fallback to Groq
+    client = get_groq_client()
     response = await client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[

@@ -1,16 +1,18 @@
 """
-Divya Vaani AI - TTS Engine v3.1 (Optimized for Speed)
-Uses Edge TTS as PRIMARY for fast response (supports Hindi/English)
-Optional voice cloning with F5-TTS when quality > speed
+Divya Vaani AI - TTS Engine v3.2 (With Voice Cloning)
+Supports multiple TTS backends:
+1. Voice Cloning (XTTS) - Clone speaker's voice from reference audio
+2. Edge TTS - Fast cloud TTS (default fallback)
+3. gTTS - Google TTS (reliable fallback)
 
 Performance:
-- Edge TTS: ~200-500ms latency (cloud, but fast)
-- F5-TTS: ~2-5s with caching (first call ~15s to load model)
+- Voice Cloning: ~3-10s per generation (GPU), ~15-30s (CPU)
+- Edge TTS: ~200-500ms latency (cloud)
+- gTTS: ~2-5s per generation
 
-Optimizations:
-- Model caching: F5-TTS model loaded once, kept in memory
-- Reference audio pre-processing: Cached after first use
-- Direct Python API instead of CLI for faster inference
+Usage:
+- Set USE_VOICE_CLONING=true in .env to enable voice cloning
+- Place reference audio in backend/data/reference_audio/ or Input/
 """
 import logging
 import uuid
@@ -35,7 +37,7 @@ EDGE_TTS_VOICES = {
     "en_female": "en-IN-NeerjaNeural"
 }
 
-# Voice mode: "fast" (Edge TTS) or "clone" (F5-TTS)
+# Voice mode: "fast" (Edge TTS), "clone" (voice cloning), "gtts" (Google TTS)
 DEFAULT_MODE = "fast"
 
 # Global state - Voice sample paths
@@ -51,17 +53,17 @@ _f5_device: Optional[str] = None
 
 
 # =============================================================================
-# Main TTS Function (Fast Mode - Edge TTS)
+# Main TTS Function (Smart Mode Selection)
 # =============================================================================
 
 async def generate_speech_async(text: str, language: str = "hi", mode: str = None) -> str:
     """
-    Generate speech quickly using Edge TTS.
+    Generate speech with intelligent mode selection.
     
     Args:
         text: Text to convert to speech
         language: "hi" for Hindi, "en" for English
-        mode: "fast" (Edge TTS) or "clone" (F5-TTS voice cloning)
+        mode: "clone" (voice cloning), "fast" (Edge TTS), "gtts", or None (auto)
     
     Returns:
         URL path to audio file
@@ -69,7 +71,10 @@ async def generate_speech_async(text: str, language: str = "hi", mode: str = Non
     if not text or not text.strip():
         return ""
     
-    mode = mode or getattr(settings, 'TTS_MODE', DEFAULT_MODE)
+    # Determine mode - check if voice cloning is enabled
+    if mode is None:
+        use_cloning = getattr(settings, 'USE_VOICE_CLONING', False)
+        mode = "clone" if use_cloning else getattr(settings, 'TTS_MODE', DEFAULT_MODE)
     
     try:
         settings.AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -78,20 +83,16 @@ async def generate_speech_async(text: str, language: str = "hi", mode: str = Non
         filename = f"tts_{audio_id}.mp3"
         filepath = settings.AUDIO_DIR / filename
         
+        # Try voice cloning first if enabled
         if mode == "clone":
-            # Try voice cloning (slower but more authentic)
-            voice_sample, transcript = _find_voice_sample()
-            if voice_sample:
-                success = await _generate_with_f5tts(text, voice_sample, transcript, filepath)
-                if success:
-                    logger.info(f"🎤 Voice clone generated: {filename}")
-                    return f"/api/audio/{filename}"
-            logger.warning("Voice sample not found, falling back to Edge TTS")
+            result = await _generate_with_voice_cloning(text, language, filepath)
+            if result:
+                return result
+            logger.warning("Voice cloning failed, falling back to Edge TTS")
         
-        # Fast mode: Edge TTS (default)
+        # Try Edge TTS (fast mode)
         success = await _generate_with_edge_tts(text, language, filepath)
         if success:
-            logger.info(f"🎤 Edge TTS generated: {filename}")
             return f"/api/audio/{filename}"
         
         return ""
@@ -102,8 +103,58 @@ async def generate_speech_async(text: str, language: str = "hi", mode: str = Non
 
 
 async def generate_long_speech_async(text: str, language: str = "hi") -> str:
-    """Generate speech for longer text - Edge TTS handles this well."""
-    return await generate_speech_async(text, language)
+    """Generate speech for longer text with voice cloning support."""
+    use_cloning = getattr(settings, 'USE_VOICE_CLONING', False)
+    
+    # For voice cloning with long text, use the chunked approach
+    if use_cloning:
+        try:
+            from core.voice_cloner import generate_long_cloned_speech, is_voice_cloning_available
+            if is_voice_cloning_available():
+                logger.info(f"🎤 Generating long speech with voice cloning ({len(text)} chars)")
+                result = await generate_long_cloned_speech(text, language)
+                if result:
+                    return result
+                logger.warning("Long voice cloning returned None, falling back")
+        except Exception as e:
+            logger.warning(f"Long voice cloning failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Fall back to regular generation - still try voice cloning first
+    return await generate_speech_async(text, language, mode=None)  # mode=None will auto-detect
+
+
+# =============================================================================
+# Voice Cloning (XTTS-v2)
+# =============================================================================
+
+async def _generate_with_voice_cloning(text: str, language: str, output_path: Path) -> Optional[str]:
+    """
+    Generate speech using voice cloning (XTTS-v2).
+    Uses reference audio to clone the speaker's voice.
+    """
+    try:
+        from core.voice_cloner import generate_cloned_speech, is_voice_cloning_available
+        
+        if not is_voice_cloning_available():
+            logger.warning("Voice cloning not available (TTS library not installed)")
+            return None
+        
+        result = await generate_cloned_speech(
+            text=text,
+            language=language,
+            output_path=output_path.with_suffix('.wav')  # XTTS outputs WAV
+        )
+        
+        return result
+        
+    except ImportError:
+        logger.warning("Voice cloner module not found")
+        return None
+    except Exception as e:
+        logger.error(f"Voice cloning error: {e}")
+        return None
 
 
 # =============================================================================
@@ -114,6 +165,7 @@ async def _generate_with_edge_tts(text: str, language: str, output_path: Path) -
     """
     Generate speech using Microsoft Edge TTS.
     Very fast (~200-500ms), good quality, supports Hindi perfectly.
+    Falls back to gTTS if Edge TTS fails (403 errors).
     """
     try:
         import edge_tts
@@ -134,9 +186,48 @@ async def _generate_with_edge_tts(text: str, language: str, output_path: Path) -
         
     except ImportError:
         logger.error("❌ edge-tts not installed. Run: pip install edge-tts")
-        return False
+        return await _generate_with_gtts_fallback(text, language, output_path)
     except Exception as e:
         logger.error(f"❌ Edge TTS error: {e}")
+        # Fallback to gTTS on any Edge TTS error (including 403)
+        logger.info("🔄 Falling back to gTTS...")
+        return await _generate_with_gtts_fallback(text, language, output_path)
+
+
+async def _generate_with_gtts_fallback(text: str, language: str, output_path: Path) -> bool:
+    """
+    Fallback TTS using Google Text-to-Speech (gTTS).
+    Slower than Edge TTS but more reliable.
+    """
+    try:
+        from gtts import gTTS
+        import asyncio
+        
+        clean_text = _clean_text_for_tts(text)
+        
+        # Map language codes
+        gtts_lang = "hi" if language == "hi" else "en"
+        
+        logger.info(f"🎤 gTTS fallback: '{clean_text[:50]}...' with lang {gtts_lang}")
+        
+        # gTTS is synchronous, run in thread pool
+        def generate_sync():
+            tts = gTTS(text=clean_text, lang=gtts_lang, slow=False)
+            tts.save(str(output_path))
+            return output_path.exists()
+        
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, generate_sync)
+        
+        if result:
+            logger.info(f"✅ gTTS generated: {output_path.name}")
+        return result
+        
+    except ImportError:
+        logger.error("❌ gTTS not installed. Run: pip install gTTS")
+        return False
+    except Exception as e:
+        logger.error(f"❌ gTTS fallback error: {e}")
         return False
 
 

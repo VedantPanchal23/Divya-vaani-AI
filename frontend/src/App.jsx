@@ -19,12 +19,18 @@ function App() {
     });
     const [isThemeTransitioning, setIsThemeTransitioning] = useState(false);
     const mediaRef = useRef(null);
+    const activeSessionRef = useRef(null);  // Ref to track active session for polling
 
     // Apply theme on mount and change with animation
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
     }, [theme]);
+
+    // Keep activeSessionRef in sync with activeSession state
+    useEffect(() => {
+        activeSessionRef.current = activeSession;
+    }, [activeSession]);
 
     const toggleTheme = () => {
         setIsThemeTransitioning(true);
@@ -74,9 +80,14 @@ function App() {
                 getTranscript(sessionId, 'en')
             ]);
 
+            // Determine status - 'complete' or 'ready' means processing is done
+            const isComplete = dataHi.status === 'complete' || dataHi.status === 'ready' || 
+                              (dataHi.full_text && dataHi.full_text.length > 0);
+
             // Transform to expected format with both languages
             setSessionData({
                 ...dataHi,
+                status: isComplete ? 'complete' : dataHi.status,
                 transcript: dataHi.full_text,
                 transcript_segments: dataHi.chunks,
                 summary: {
@@ -103,48 +114,139 @@ function App() {
         }
     };
 
-    // Poll for processing status
-    const pollStatus = useCallback(async (sessionId) => {
+    // Poll for processing status - auto-refresh when complete
+    const pollStatus = useCallback((sessionId) => {
+        let isPolling = true;
+        
         const poll = async () => {
+            if (!isPolling) return;
+            
             try {
                 const status = await getTranscript(sessionId);
 
-                // Update session in list
-                const sessionStatus = status.status === 'complete' ? 'complete' :
-                    status.status === 'error' ? 'error' : 'processing';
+                // Determine if processing is complete
+                // Backend returns status: "processing" with step field, or status: "complete"
+                const isComplete = status.status === 'complete' || 
+                    (status.full_text && status.summary && status.status !== 'processing');
+                const isError = status.status === 'error' || status.step === 'failed';
+                const isProcessing = !isComplete && !isError;
 
+                // Update session status in list
+                const sessionStatus = isComplete ? 'complete' : isError ? 'error' : 'processing';
+                
                 setSessions(prev => prev.map(s =>
-                    s.id === sessionId ? { ...s, status: sessionStatus } : s
+                    s.id === sessionId ? { 
+                        ...s, 
+                        status: sessionStatus,
+                        step: status.step,
+                        progress: status.progress,
+                        message: status.message
+                    } : s
                 ));
 
+                // Update session data in real-time during processing (use ref for current value)
+                if (activeSessionRef.current === sessionId) {
+                    if (isProcessing) {
+                        // Update progress during processing
+                        setSessionData(prev => ({
+                            ...prev,
+                            status: sessionStatus,
+                            step: status.step,
+                            progress: status.progress,
+                            message: status.message,
+                            ...(status.full_text && { transcript: status.full_text }),
+                            ...(status.chunks && { transcript_segments: status.chunks })
+                        }));
+                    }
+                }
+
                 // If still processing, continue polling
-                if (status.status === 'processing') {
+                if (isProcessing && isPolling) {
                     setTimeout(poll, 2000);
-                } else {
-                    // Refresh session data when done
-                    if (activeSession === sessionId) {
-                        fetchSessionData(sessionId);
+                } else if (isComplete || isError) {
+                    // Processing complete or error - fetch full session data
+                    console.log('Processing complete! Fetching full session data...');
+                    
+                    // Always fetch the complete data when done
+                    if (activeSessionRef.current === sessionId) {
+                        // Fetch both Hindi and English versions
+                        try {
+                            const [dataHi, dataEn] = await Promise.all([
+                                getTranscript(sessionId, 'hi'),
+                                getTranscript(sessionId, 'en')
+                            ]);
+
+                            const finalStatus = dataHi.status === 'complete' || dataHi.full_text ? 'complete' : dataHi.status;
+
+                            setSessionData({
+                                ...dataHi,
+                                status: finalStatus,
+                                transcript: dataHi.full_text,
+                                transcript_segments: dataHi.chunks,
+                                summary: {
+                                    hindi: dataHi.summary || '',
+                                    english: dataEn.summary || ''
+                                },
+                                explanation: {
+                                    hindi: dataHi.explanation || '',
+                                    english: dataEn.explanation || ''
+                                },
+                                summary_audio: {
+                                    hindi: dataHi.summary_audio || '',
+                                    english: dataEn.summary_audio || ''
+                                },
+                                explanation_audio: {
+                                    hindi: dataHi.explanation_audio || '',
+                                    english: dataEn.explanation_audio || ''
+                                }
+                            });
+                            console.log('Session data updated with complete results!');
+                        } catch (error) {
+                            console.error('Failed to fetch complete session data:', error);
+                        }
                     }
                     fetchSessions();
                 }
             } catch (error) {
                 console.error('Polling error:', error);
                 // Retry on error
-                setTimeout(poll, 3000);
+                if (isPolling) {
+                    setTimeout(poll, 3000);
+                }
             }
         };
+        
         poll();
-    }, [activeSession]);
+        
+        // Return cleanup function
+        return () => {
+            isPolling = false;
+        };
+    }, []);  // No dependencies - uses ref for activeSession
 
     const handleUploadSuccess = (result) => {
-        setSessions(prev => [{
+        const newSession = {
             id: result.file_id,
             filename: result.filename,
             status: 'processing',
+            step: 'transcribing',
+            progress: 0,
             created_at: new Date().toISOString()
-        }, ...prev]);
-
+        };
+        
+        setSessions(prev => [newSession, ...prev]);
         setActiveSession(result.file_id);
+        
+        // Initialize session data to show processing UI immediately
+        setSessionData({
+            id: result.file_id,
+            filename: result.filename,
+            status: 'processing',
+            step: 'transcribing',
+            progress: 0,
+            message: 'Starting transcription...'
+        });
+        
         pollStatus(result.file_id);
     };
 
@@ -271,7 +373,7 @@ function App() {
                             )}
 
                             {/* Processing Status with Steps */}
-                            {sessionData.status !== 'ready' && sessionData.status !== 'error' && (
+                            {sessionData.status === 'processing' && sessionData.status !== 'complete' && sessionData.status !== 'error' && (
                                 <div className="card fade-in" style={{ marginBottom: 'var(--spacing-lg)' }}>
                                     <div className="card-header">
                                         <h3 className="card-title">
@@ -286,8 +388,13 @@ function App() {
                                             <div className="audio-bar"></div>
                                         </div>
                                     </div>
+                                    {sessionData.message && (
+                                        <p style={{ color: 'var(--color-text-muted)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                                            {sessionData.message}
+                                        </p>
+                                    )}
                                     <div className="processing-steps">
-                                        {getProcessingSteps(sessionData.status).map((step) => (
+                                        {getProcessingSteps(sessionData.step || 'transcribing').map((step) => (
                                             <div
                                                 key={step.key}
                                                 className={`processing-step ${step.active ? 'active' : ''} ${step.done ? 'done' : ''}`}

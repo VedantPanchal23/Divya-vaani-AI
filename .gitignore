@@ -47,3 +47,4 @@ backend/data/chroma_db/
 
 # Keep structure
 !backend/data/bhagavad_gita.json
+input/
