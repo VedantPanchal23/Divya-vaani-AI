@@ -121,7 +121,6 @@ The system auto-detects these files. No manual setup required!
 ## ⚠️ Disclaimer
 
 This is an **AI-generated spiritual assistant**.  
-It is **NOT** the real Premanand Govind Sharan Maharaj.  
 All responses are AI-generated based on uploaded discourses only.
 
 ---
