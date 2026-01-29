@@ -40,15 +40,15 @@ sentence-transformers==3.0.0
 pydub==0.25.1
 
 # ------------------------
-# Text-to-Speech
-# F5-TTS: Best for Hindi voice cloning (handles punctuation well)
-# IndicF5: Hindi-optimized (install from GitHub if needed):
-#   pip install git+https://github.com/AI4Bharat/IndicF5.git
-# Edge TTS: Microsoft's free TTS, fallback
+# Text-to-Speech (Optimized for Speed)
+# Edge TTS: PRIMARY - Microsoft's free TTS, fast & reliable
+# F5-TTS: OPTIONAL - Voice cloning (slower, needs GPU for speed)
 # ------------------------
 edge-tts>=6.1.12
-f5-tts>=1.0.0
-soundfile>=0.12.0
+
+# Optional: For voice cloning (slower but authentic voice)
+# pip install f5-tts>=1.0.0
+# pip install soundfile>=0.12.0
 
 # ------------------------
 # Utilities

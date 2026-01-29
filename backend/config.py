@@ -34,14 +34,15 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2000
     
-    # Voice Cloning Settings
-    USE_VOICE_CLONING: bool = True  # Use voice cloning for Maharaj's voice
+    # TTS Settings (Optimized for Speed)
+    TTS_MODE: str = "fast"         # "fast" (Edge TTS - low latency) or "clone" (F5-TTS - voice cloning)
+    USE_VOICE_CLONING: bool = False # Use voice cloning for Maharaj's voice (slower)
     VOICE_SAMPLE_PATH: str = ""    # Path to Maharaj's voice sample (auto-detected if empty)
     MAHARAJ_MODEL_PATH: str = ""   # Path to custom trained model (from Kaggle)
     REFERENCE_AUDIO_PATH: str = "" # Path to optimized reference audio (15-30s clip)
     REFERENCE_TRANSCRIPT_PATH: str = ""  # Path to reference audio transcript
-    TTS_SAMPLE_RATE: int = 24000   # Sample rate for TTS output (24kHz for F5-TTS)
-    TTS_MODEL: str = "IndicF5"     # Model: "IndicF5", "F5-TTS", or "custom"
+    TTS_SAMPLE_RATE: int = 24000   # Sample rate for TTS output
+    TTS_MODEL: str = "EdgeTTS"     # Model: "EdgeTTS" (fast), "IndicF5", "F5-TTS"
     
     # Paths (computed)
     @property
