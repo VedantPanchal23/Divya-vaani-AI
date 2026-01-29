@@ -1,0 +1,56 @@
+# ============================================================
+# Divya Vaani AI - Backend Dependencies (v3.1)
+# Python 3.11 | Voice Cloning + Groq API
+# ============================================================
+#
+# INSTALLATION:
+# 1. Create venv: py -3.11 -m venv venv
+# 2. Activate: .\venv\Scripts\activate
+# 3. Install: pip install -r requirements.txt
+# 4. For GPU voice cloning: pip install torch --index-url https://download.pytorch.org/whl/cu118
+# ============================================================
+
+# ------------------------
+# Core FastAPI & Server
+# ------------------------
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+pydantic==2.9.0
+pydantic-settings==2.5.0
+aiofiles==24.1.0
+
+# ------------------------
+# Groq API (LLM + Whisper)
+# ------------------------
+groq==0.11.0
+httpx==0.27.2
+
+# ------------------------
+# Vector Search (FAISS + Embeddings)
+# NumPy 1.x required for FAISS compatibility
+# ------------------------
+numpy==1.26.4
+faiss-cpu==1.9.0.post1
+sentence-transformers==3.0.0
+
+# ------------------------
+# Audio Processing
+# ------------------------
+pydub==0.25.1
+
+# ------------------------
+# Text-to-Speech
+# F5-TTS: Best for Hindi voice cloning (handles punctuation well)
+# IndicF5: Hindi-optimized (install from GitHub if needed):
+#   pip install git+https://github.com/AI4Bharat/IndicF5.git
+# Edge TTS: Microsoft's free TTS, fallback
+# ------------------------
+edge-tts>=6.1.12
+f5-tts>=1.0.0
+soundfile>=0.12.0
+
+# ------------------------
+# Utilities
+# ------------------------
+python-dotenv==1.0.1

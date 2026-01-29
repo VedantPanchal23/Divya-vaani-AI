@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+venv/
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Next.js
+.next/
+out/
+
+# Data directories (keep structure, ignore content)
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+backend/data/transcripts/*
+!backend/data/transcripts/.gitkeep
+backend/data/chroma_db/
+
+# Audio files
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.webm
+*.mp4
+
+# Keep structure
+!backend/data/bhagavad_gita.json
