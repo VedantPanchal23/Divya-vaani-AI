@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Fast startup - no blocking operations."""
+    """Fast startup - with optional voice cloning pre-warm."""
+    import asyncio
+    
     print()
     print("=" * 60)
     print(f"  🙏 {settings.APP_NAME} v{settings.APP_VERSION}")
@@ -34,6 +36,24 @@ async def lifespan(app: FastAPI):
         print("✅ Groq API configured")
     else:
         print("❌ GROQ_API_KEY not set! Check .env file")
+    
+    # Check voice cloning settings
+    if settings.USE_VOICE_CLONING:
+        print("✅ Voice Cloning enabled (XTTS-v2)")
+        print("   🔥 Pre-warming voice cloning in background...")
+        
+        # Pre-warm voice cloning in background (non-blocking)
+        async def prewarm_task():
+            try:
+                from core.voice_cloner import prewarm_voice_cloning
+                await prewarm_voice_cloning()
+            except Exception as e:
+                logger.warning(f"Voice cloning pre-warm failed: {e}")
+        
+        # Start pre-warming in background
+        asyncio.create_task(prewarm_task())
+    else:
+        print("ℹ️ Voice Cloning disabled (using Edge TTS)")
     
     print()
     print(f"🚀 Server: http://localhost:{settings.PORT}")

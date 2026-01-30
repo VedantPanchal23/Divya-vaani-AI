@@ -36,14 +36,14 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 2000
     
     # TTS Settings (Optimized for Speed)
-    TTS_MODE: str = "fast"         # "fast" (Edge TTS - low latency) or "clone" (voice cloning)
-    USE_VOICE_CLONING: bool = False # Enable voice cloning (requires TTS library)
+    TTS_MODE: str = "clone"        # "fast" (Edge TTS - low latency) or "clone" (voice cloning)
+    USE_VOICE_CLONING: bool = True  # Enable voice cloning (requires TTS library)
     VOICE_SAMPLE_PATH: str = ""    # Path to voice sample (auto-detected if empty)
     MAHARAJ_MODEL_PATH: str = ""   # Path to custom trained model (if any)
     REFERENCE_AUDIO_PATH: str = "" # Path to reference audio for cloning (10-30s recommended)
     REFERENCE_TRANSCRIPT_PATH: str = ""  # Optional: transcript of reference audio
-    TTS_SAMPLE_RATE: int = 24000   # Sample rate for TTS output
-    TTS_MODEL: str = "EdgeTTS"     # Model: "EdgeTTS" (fast), "XTTS" (voice cloning)
+    TTS_SAMPLE_RATE: int = 22050   # Sample rate for TTS output (XTTS requirement)
+    TTS_MODEL: str = "XTTS"        # Model: "EdgeTTS" (fast), "XTTS" (voice cloning)
     
     # Paths (computed)
     @property
@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     # RAG Settings - Using E5 multilingual (best for retrieval)
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"  # Best for Hindi+English retrieval
     EMBEDDING_DIM: int = 384  # Dimension for this model
-    TOP_K: int = 5
-    SIMILARITY_THRESHOLD: float = 0.6  # E5 model produces higher quality scores
+    TOP_K: int = 10  # Retrieve more chunks for better context
+    SIMILARITY_THRESHOLD: float = 0.3  # Lower threshold to allow more relevant spiritual guidance
     
     # Transcription Enhancement Settings
     PARALLEL_TRANSCRIPTION: bool = True  # Process chunks in parallel for speed

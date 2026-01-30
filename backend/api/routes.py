@@ -104,9 +104,9 @@ async def _process_upload(file_id: str, file_path: Path, filename: str):
         summary_hi = await llm_engine.generate_summary(transcript.full_text, "hi")
         summary_en = await llm_engine.generate_summary(transcript.full_text, "en")
         
-        # Generate summary audio (use long speech for better voice cloning)
-        summary_audio_hi = await tts_engine.generate_long_speech_async(summary_hi, "hi")
-        summary_audio_en = await tts_engine.generate_long_speech_async(summary_en, "en")
+        # Generate summary audio (using cloned voice)
+        summary_audio_hi = await tts_engine.generate_speech_async(summary_hi, "hi", mode="clone")
+        summary_audio_en = await tts_engine.generate_speech_async(summary_en, "en", mode="clone")
         
         # Step 3: Generate Explanation
         _status[file_id]["step"] = "explaining"
@@ -116,9 +116,9 @@ async def _process_upload(file_id: str, file_path: Path, filename: str):
         explanation_hi = await llm_engine.generate_explanation(transcript.full_text, "hi")
         explanation_en = await llm_engine.generate_explanation(transcript.full_text, "en")
         
-        # Generate explanation audio (use long speech for better voice cloning)
-        explanation_audio_hi = await tts_engine.generate_long_speech_async(explanation_hi, "hi")
-        explanation_audio_en = await tts_engine.generate_long_speech_async(explanation_en, "en")
+        # Generate explanation audio (using cloned voice)
+        explanation_audio_hi = await tts_engine.generate_speech_async(explanation_hi, "hi", mode="clone")
+        explanation_audio_en = await tts_engine.generate_speech_async(explanation_en, "en", mode="clone")
         
         # Store results
         _status[file_id] = {
@@ -207,15 +207,52 @@ async def list_transcripts():
 
 # ========== Chat / Q&A ==========
 
+def _expand_question_for_search(question: str) -> str:
+    """
+    Expand the user's question with spiritual keywords to improve semantic search.
+    This helps find relevant content when user asks emotional questions.
+    """
+    # Map common emotional/life questions to spiritual keywords
+    expansion_keywords = {
+        # Negative emotions / life problems
+        "don't want to live": "जीवन परेशान दुख धैर्य सेवा भगवदाश्रय कमजोर",
+        "want to die": "जीवन परेशान दुख धैर्य सेवा भगवदाश्रय मरना",
+        "hopeless": "परेशान दुख धैर्य गंभीर विपत्ति समाधान",
+        "depressed": "परेशान दुख कमजोर धैर्य गंभीर भगवान कृपा",
+        "sad": "परेशान दुख धैर्य गंभीर भगवान कृपा",
+        "struggling": "परेशान विपत्ति समस्या धैर्य गंभीर",
+        "difficult": "विपत्ति समस्या धैर्य गंभीर समाधान",
+        "problem": "समस्या विपत्ति समाधान धैर्य",
+        "suffering": "दुख पीड़ा धैर्य भगवदाश्रय",
+        "pain": "पीड़ा दुख धैर्य सहन भगवदाश्रय",
+        "fear": "भय डर धैर्य भगवदाश्रय",
+        "anxiety": "परेशान चिंता धैर्य गंभीर",
+        "worried": "परेशान चिंता धैर्य गंभीर",
+        "जीना नहीं": "जीवन परेशान दुख धैर्य सेवा भगवदाश्रय",
+        "मरना": "जीवन परेशान दुख धैर्य सेवा मृत्यु",
+        "परेशान": "परेशान दुख धैर्य गंभीर समाधान",
+        "दुखी": "दुख परेशान धैर्य भगवान कृपा",
+    }
+    
+    expanded = question
+    question_lower = question.lower()
+    
+    for key, expansion in expansion_keywords.items():
+        if key in question_lower:
+            expanded = f"{question} {expansion}"
+            break
+    
+    return expanded
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Ask a question.
+    Ask a question - answers come from uploaded spiritual discourses.
     
-    Priority:
-    1. Search transcript (if transcript_id provided or any transcripts exist)
-    2. Fallback to Bhagavad Gita (when implemented)
-    3. Polite refusal if not found
+    The system searches through transcribed pravachans to find relevant
+    spiritual guidance for the user's question, then provides wisdom
+    from Maharaj Ji's teachings.
     """
     question = request.question.strip()
     language = request.language if request.language in ["hi", "en"] else "hi"
@@ -223,35 +260,47 @@ async def chat(request: ChatRequest):
     if not question:
         raise HTTPException(400, "Question cannot be empty")
     
-    # Try transcript search first
+    # Always search transcripts if any exist
     if request.transcript_id or rag_engine.has_transcripts():
+        # Expand question with spiritual keywords for better semantic search
+        expanded_query = _expand_question_for_search(question)
+        
+        # Search with expanded query and get more chunks
         chunks = rag_engine.search_transcripts(
-            question, 
+            expanded_query, 
             transcript_id=request.transcript_id,
-            top_k=5
+            top_k=10  # Get more chunks for better context
         )
         
+        # If no results with expanded query, try original question
+        if not chunks:
+            chunks = rag_engine.search_transcripts(
+                question, 
+                transcript_id=request.transcript_id,
+                top_k=10
+            )
+        
         if chunks:
-            # Build context from chunks
+            # Build rich context from chunks
             context_parts = []
             for c in chunks:
                 timestamp = f"[{_format_time(c.start_time)} - {_format_time(c.end_time)}]"
                 context_parts.append(f"{timestamp}: {c.text}")
             
-            context = "\n".join(context_parts)
+            context = "\n\n".join(context_parts)
             
-            # Generate answer
+            # Generate compassionate answer from the spiritual discourse
             answer = await llm_engine.generate_answer(
                 question, context, SourceType.PRAVACHAN, language
             )
             
-            # Generate audio for answer
-            audio_url = await tts_engine.generate_speech_async(answer, language)
+            # Generate audio for answer (using cloned voice)
+            audio_url = await tts_engine.generate_speech_async(answer, language, mode="clone")
             
             return ChatResponse(
                 answer=answer,
                 source_type=SourceType.PRAVACHAN,
-                source_reference=f"Found in {len(chunks)} segments",
+                source_reference=f"Based on {len(chunks)} segments from the discourse",
                 audio_url=audio_url
             )
     
@@ -259,7 +308,7 @@ async def chat(request: ChatRequest):
     
     # Not found response
     not_found = await llm_engine.generate_not_found(language)
-    audio_url = await tts_engine.generate_speech_async(not_found, language)
+    audio_url = await tts_engine.generate_speech_async(not_found, language, mode="clone")
     
     return ChatResponse(
         answer=not_found,
@@ -307,8 +356,8 @@ async def transcribe_voice_input(audio: UploadFile = File(...)):
 
 @router.post("/tts", response_model=TTSResponse)
 async def synthesize_speech(request: TTSRequest):
-    """Convert text to speech (uses voice cloning if enabled)."""
-    audio_url = await tts_engine.generate_speech_async(request.text, request.language)
+    """Convert text to speech (uses cloned voice)."""
+    audio_url = await tts_engine.generate_speech_async(request.text, request.language, mode="clone")
     
     if not audio_url:
         raise HTTPException(500, "TTS generation failed")

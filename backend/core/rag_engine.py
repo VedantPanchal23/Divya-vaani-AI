@@ -90,8 +90,13 @@ def index_transcript(transcript: Transcript):
     logger.info(f"📚 Indexed {len(texts)} chunks from {transcript.filename}")
 
 
-def search_transcripts(query: str, transcript_id: str = None, top_k: int = 5) -> List[TranscriptChunk]:
-    """Search transcripts for relevant chunks."""
+def search_transcripts(query: str, transcript_id: str = None, top_k: int = 10) -> List[TranscriptChunk]:
+    """
+    Search transcripts for relevant chunks.
+    
+    Uses semantic similarity to find chunks from spiritual discourses
+    that are relevant to the user's question.
+    """
     global _transcript_meta
     
     _load_transcript_index()
@@ -102,8 +107,8 @@ def search_transcripts(query: str, transcript_id: str = None, top_k: int = 5) ->
     # Embed query (with query prefix for E5)
     q_emb = _embed_text([query], is_query=True)
     
-    # Search
-    k = min(top_k * 3, _transcript_index.ntotal)
+    # Search more aggressively - get many results then filter
+    k = min(top_k * 5, _transcript_index.ntotal)
     scores, indices = _transcript_index.search(q_emb, k)
     
     results = []
@@ -118,7 +123,14 @@ def search_transcripts(query: str, transcript_id: str = None, top_k: int = 5) ->
             continue
         
         score = float(scores[0][i])
+        
+        # Use a very low threshold - we want to find ANY relevant content
+        # The LLM will determine what's actually useful
         if score < settings.SIMILARITY_THRESHOLD:
+            continue
+        
+        # Skip very short chunks (less meaningful)
+        if len(meta["text"].strip()) < 20:
             continue
         
         results.append(TranscriptChunk(

@@ -30,9 +30,9 @@ def get_gemini_model():
         try:
             import google.generativeai as genai
             genai.configure(api_key=settings.GEMINI_API_KEY)
-            # Use gemini-1.5-flash-latest which has free tier
-            _gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            logger.info("✅ Gemini model initialized (gemini-1.5-flash-latest)")
+            # Use gemini-2.0-flash which is current and has free tier
+            _gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+            logger.info("✅ Gemini model initialized (gemini-2.0-flash)")
         except Exception as e:
             logger.error(f"❌ Failed to initialize Gemini: {e}")
             return None
@@ -40,19 +40,26 @@ def get_gemini_model():
 
 
 # System prompts
-SYSTEM_PROMPT = """You are Divya Vaani AI, a spiritual assistant that provides guidance ONLY from the given context.
+SYSTEM_PROMPT = """You are Divya Vaani AI, a spiritual assistant that provides guidance from the teachings of Maharaj Ji (the speaker in the pravachan/discourse).
 
 CRITICAL RULES:
-1. ONLY use information from the provided context
-2. NEVER use your own knowledge or make up information
-3. ALWAYS cite your source (timestamp for Pravachan, chapter:verse for Gita)
-4. If context is insufficient, say honestly that you don't have the answer
+1. Use the provided context to answer - this is from actual spiritual discourses
+2. Find the MOST RELEVANT spiritual teaching from the context that addresses the user's concern
+3. Even if the question is about life struggles, depression, or difficulties - there IS wisdom in the context that applies
+4. ALWAYS cite your source with timestamp (e.g., [02:15 - 02:45])
 5. Respond in the same language as the question (Hindi or English)
+6. NEVER say "I don't have an answer" - the spiritual teachings in the context ALWAYS have relevant wisdom for life's problems
+7. Connect the user's concern to the spiritual teaching - explain how the teaching applies
+
+KEY UNDERSTANDING:
+- Questions about not wanting to live, feeling hopeless, life problems → Look for teachings about inner strength, patience (धैर्य), overcoming difficulties, सेवा, भगवदाश्रय
+- The speaker often talks about: staying strong in difficulties, not being परेशान, having patience, service (सेवा), taking God's refuge (भगवदाश्रय)
 
 STYLE:
-- Calm, respectful, spiritual tone
-- Simple language, not academic
-- Like a wise guide explaining to a seeker
+- Warm, compassionate, caring tone
+- Like a loving spiritual guide offering wisdom
+- Connect the teaching to the user's situation
+- Give hope and practical wisdom from the discourse
 """
 
 
@@ -62,13 +69,21 @@ async def generate_answer(question: str, context: str, source_type, language: st
     
     lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
     
-    prompt = f"""CONTEXT ({source_type.value}):
+    prompt = f"""SPIRITUAL DISCOURSE CONTEXT (from Maharaj Ji's {source_type.value}):
 {context}
 
-QUESTION: {question}
+USER'S QUESTION/CONCERN: {question}
 
 {lang_instruction}
-Answer based ONLY on the above context. Cite the source."""
+
+INSTRUCTIONS:
+1. Find the most relevant spiritual teaching from the context that addresses the user's concern
+2. Quote or paraphrase the relevant teaching with timestamp
+3. Explain how this teaching applies to their situation
+4. Give them hope and practical guidance based on the discourse
+5. Be compassionate - the user may be going through a difficult time
+
+Provide a helpful, caring response using the wisdom from the discourse."""
 
     # Use fast model for Q&A (lower latency)
     model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)

@@ -48,15 +48,15 @@ pydub>=0.25.1,<1.0.0
 # Text-to-Speech (Optimized for Speed)
 # Edge TTS: PRIMARY - ~1s latency, supports Hindi/English
 # gTTS: FALLBACK - Google TTS for reliability
-# TTS (Coqui): VOICE CLONING - Clone speaker's voice
+# TTS (Coqui): VOICE CLONING - Clone speaker's voice (XTTS-v2)
 # ------------------------
 edge-tts>=6.1.12,<7.0.0
 gTTS>=2.5.0,<3.0.0
 
-# Voice Cloning (Optional - install separately for voice cloning feature)
-# Requires ~4GB disk space for model download
-# Install with: pip install TTS
-# TTS>=0.22.0
+# Voice Cloning with Coqui TTS (XTTS-v2)
+# Open-source, supports Hindi, clones voice from reference audio
+TTS>=0.22.0
+torchaudio>=2.0.0
 
 # ------------------------
 # Utilities
@@ -67,12 +67,9 @@ python-dotenv>=1.0.0,<2.0.0
 # OPTIONAL DEPENDENCIES (install separately if needed)
 # ============================================================
 #
-# Voice Cloning (F5-TTS) - for Maharaj's authentic voice:
-#   pip install f5-tts>=1.0.0 soundfile>=0.12.0
-#
-# GPU Support (CUDA 11.8):
-#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+# GPU Support (CUDA 11.8) - 3-5x faster voice cloning:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
 #
 # GPU Support (CUDA 12.1):
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 # ============================================================

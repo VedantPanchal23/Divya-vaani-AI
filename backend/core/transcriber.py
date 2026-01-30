@@ -126,49 +126,81 @@ def _split_audio_file(file_path: Path, max_duration_ms: int = MAX_CHUNK_DURATION
     return chunks
 
 
-async def _transcribe_single_chunk(file_path: Path, time_offset: float = 0.0) -> Tuple[List[dict], float]:
-    """Transcribe a single audio chunk via Groq API."""
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        with open(file_path, "rb") as f:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
-                files={"file": (file_path.name, f, "audio/mpeg")},
-                data={
-                    "model": "whisper-large-v3",
-                    "response_format": "verbose_json",
-                    "language": "hi",
-                    "temperature": 0.0,
-                    "prompt": PROMPT
-                }
-            )
+async def _transcribe_single_chunk(file_path: Path, time_offset: float = 0.0, max_retries: int = 3) -> Tuple[List[dict], float]:
+    """Transcribe a single audio chunk via Groq API with retry logic."""
+    import asyncio
     
-    if response.status_code != 200:
-        logger.error(f"❌ API Error: {response.text[:500]}")
-        raise ValueError(f"Transcription failed: {response.status_code}")
+    last_error = None
     
-    result = response.json()
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                with open(file_path, "rb") as f:
+                    response = await client.post(
+                        "https://api.groq.com/openai/v1/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                        files={"file": (file_path.name, f, "audio/mpeg")},
+                        data={
+                            "model": "whisper-large-v3",
+                            "response_format": "verbose_json",
+                            "language": "hi",
+                            "temperature": 0.0,
+                            "prompt": PROMPT
+                        }
+                    )
+            
+            # Retry on 5xx server errors
+            if response.status_code >= 500:
+                wait_time = (attempt + 1) * 5  # 5s, 10s, 15s
+                logger.warning(f"⚠️ Server error {response.status_code}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                await asyncio.sleep(wait_time)
+                last_error = f"Server error: {response.status_code}"
+                continue
+            
+            if response.status_code != 200:
+                logger.error(f"❌ API Error: {response.text[:500]}")
+                raise ValueError(f"Transcription failed: {response.status_code}")
+            
+            result = response.json()
+            
+            # Adjust timestamps with offset
+            segments = []
+            for seg in result.get("segments", []):
+                segments.append({
+                    "text": seg.get("text", "").strip(),
+                    "start": seg.get("start", 0.0) + time_offset,
+                    "end": seg.get("end", 0.0) + time_offset
+                })
+            
+            # Fallback if no segments
+            if not segments and result.get("text"):
+                duration = result.get("duration", 0.0)
+                segments.append({
+                    "text": result["text"].strip(),
+                    "start": time_offset,
+                    "end": time_offset + duration
+                })
+            
+            chunk_duration = result.get("duration", 0.0)
+            return segments, chunk_duration
+            
+        except httpx.TimeoutException as e:
+            wait_time = (attempt + 1) * 5
+            logger.warning(f"⚠️ Timeout, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+            await asyncio.sleep(wait_time)
+            last_error = str(e)
+            continue
+        except ValueError:
+            raise  # Don't retry client errors (4xx)
+        except Exception as e:
+            wait_time = (attempt + 1) * 5
+            logger.warning(f"⚠️ Error: {e}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+            await asyncio.sleep(wait_time)
+            last_error = str(e)
+            continue
     
-    # Adjust timestamps with offset
-    segments = []
-    for seg in result.get("segments", []):
-        segments.append({
-            "text": seg.get("text", "").strip(),
-            "start": seg.get("start", 0.0) + time_offset,
-            "end": seg.get("end", 0.0) + time_offset
-        })
-    
-    # Fallback if no segments
-    if not segments and result.get("text"):
-        duration = result.get("duration", 0.0)
-        segments.append({
-            "text": result["text"].strip(),
-            "start": time_offset,
-            "end": time_offset + duration
-        })
-    
-    chunk_duration = result.get("duration", 0.0)
-    return segments, chunk_duration
+    # All retries exhausted
+    raise ValueError(f"Transcription failed after {max_retries} attempts: {last_error}")
 
 
 async def transcribe_audio(file_id: str, file_path: Path, filename: str, progress_callback=None) -> Transcript:

@@ -103,7 +103,7 @@ async def generate_speech_async(text: str, language: str = "hi", mode: str = Non
 
 
 async def generate_long_speech_async(text: str, language: str = "hi") -> str:
-    """Generate speech for longer text with voice cloning support."""
+    """Generate speech for longer text."""
     use_cloning = getattr(settings, 'USE_VOICE_CLONING', False)
     
     # For voice cloning with long text, use the chunked approach
@@ -111,18 +111,14 @@ async def generate_long_speech_async(text: str, language: str = "hi") -> str:
         try:
             from core.voice_cloner import generate_long_cloned_speech, is_voice_cloning_available
             if is_voice_cloning_available():
-                logger.info(f"🎤 Generating long speech with voice cloning ({len(text)} chars)")
                 result = await generate_long_cloned_speech(text, language)
                 if result:
                     return result
-                logger.warning("Long voice cloning returned None, falling back")
         except Exception as e:
             logger.warning(f"Long voice cloning failed: {e}")
-            import traceback
-            traceback.print_exc()
     
-    # Fall back to regular generation - still try voice cloning first
-    return await generate_speech_async(text, language, mode=None)  # mode=None will auto-detect
+    # Fall back to regular generation (Edge TTS handles long text well)
+    return await generate_speech_async(text, language, mode="fast")
 
 
 # =============================================================================
