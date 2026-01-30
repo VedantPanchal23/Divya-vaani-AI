@@ -298,16 +298,17 @@ async def generate_cloned_speech(
                     logger.info("   ✅ Speaker embeddings cached!")
                 
                 # Generate speech using cached embeddings (FAST!)
+                # Using LOW temperature for CONSISTENT voice across all generations
                 out = xtts.inference(
                     text=clean_text,
                     language=xtts_lang,
                     gpt_cond_latent=_cached_gpt_cond_latent,
                     speaker_embedding=_cached_speaker_embedding,
-                    temperature=0.65,  # Slightly lower for more consistent output
+                    temperature=0.1,  # VERY LOW for consistent voice (was 0.65)
                     length_penalty=1.0,
-                    repetition_penalty=2.5,  # Prevent repetition
-                    top_k=50,
-                    top_p=0.85,
+                    repetition_penalty=5.0,  # Higher to prevent repetition
+                    top_k=30,  # Lower for more deterministic output
+                    top_p=0.7,  # Lower for consistency
                     enable_text_splitting=True
                 )
                 
@@ -469,6 +470,7 @@ async def generate_long_cloned_speech(
     chunks = _split_text_into_chunks(text, max_chars=400)
     
     if not chunks:
+        logger.warning("No chunks generated from text")
         return None
     
     logger.info(f"🎤 Long text ({len(text)} chars) split into {len(chunks)} chunks")
@@ -477,20 +479,29 @@ async def generate_long_cloned_speech(
     chunk_paths = []
     try:
         for i, chunk in enumerate(chunks):
+            logger.info(f"   Generating chunk {i+1}/{len(chunks)}...")
             chunk_id = str(uuid.uuid4())[:8]
             chunk_path = settings.AUDIO_DIR / f"chunk_{chunk_id}.wav"
             
             result = await generate_cloned_speech(chunk, language, reference_audio, chunk_path)
             if result:
-                # Get the actual path (might be mp3)
-                actual_path = settings.AUDIO_DIR / f"chunk_{chunk_id}.mp3"
+                # The result is a URL like /api/audio/clone_xxx.mp3
+                # Extract the filename and get the actual path
+                filename = result.split('/')[-1]
+                actual_path = settings.AUDIO_DIR / filename
                 if actual_path.exists():
                     chunk_paths.append(actual_path)
-                elif chunk_path.exists():
-                    chunk_paths.append(chunk_path)
+                    logger.info(f"   ✅ Chunk {i+1} saved: {filename}")
+                else:
+                    logger.warning(f"   ⚠️ Chunk {i+1} file not found: {actual_path}")
+            else:
+                logger.warning(f"   ⚠️ Chunk {i+1} generation failed")
         
         if not chunk_paths:
+            logger.error("No chunks were successfully generated")
             return None
+        
+        logger.info(f"🎤 Combining {len(chunk_paths)} audio chunks...")
         
         # Combine all chunks
         combined_path = await _combine_audio_chunks(chunk_paths, output_path)
@@ -502,10 +513,15 @@ async def generate_long_cloned_speech(
             except:
                 pass
         
+        if combined_path:
+            logger.info(f"✅ Long speech generation complete: {combined_path}")
+        
         return combined_path
         
     except Exception as e:
         logger.error(f"Long speech generation failed: {e}")
+        import traceback
+        traceback.print_exc()
         # Cleanup on error
         for p in chunk_paths:
             try:

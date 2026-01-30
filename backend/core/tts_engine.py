@@ -85,12 +85,21 @@ async def generate_speech_async(text: str, language: str = "hi", mode: str = Non
         
         # Try voice cloning first if enabled
         if mode == "clone":
+            # For longer text, use chunked approach
+            text_length = len(text.strip())
+            if text_length > 500:
+                logger.info(f"🎤 Long text ({text_length} chars), using chunked voice cloning...")
+                result = await _generate_long_voice_cloning(text, language)
+                if result:
+                    return result
+                logger.warning("Long voice cloning failed, trying single generation...")
+            
             result = await _generate_with_voice_cloning(text, language, filepath)
             if result:
                 return result
-            logger.warning("Voice cloning failed, falling back to Edge TTS")
+            logger.warning("⚠️ Voice cloning failed, falling back to Edge TTS (female voice)")
         
-        # Try Edge TTS (fast mode)
+        # Try Edge TTS (fast mode) - THIS IS THE FALLBACK
         success = await _generate_with_edge_tts(text, language, filepath)
         if success:
             return f"/api/audio/{filename}"
@@ -100,6 +109,19 @@ async def generate_speech_async(text: str, language: str = "hi", mode: str = Non
     except Exception as e:
         logger.error(f"❌ TTS failed: {e}")
         return ""
+
+
+async def _generate_long_voice_cloning(text: str, language: str) -> Optional[str]:
+    """Generate cloned speech for long text using chunking."""
+    try:
+        from core.voice_cloner import generate_long_cloned_speech, is_voice_cloning_available
+        if is_voice_cloning_available():
+            result = await generate_long_cloned_speech(text, language)
+            if result:
+                return result
+    except Exception as e:
+        logger.warning(f"Long voice cloning failed: {e}")
+    return None
 
 
 async def generate_long_speech_async(text: str, language: str = "hi") -> str:
@@ -137,11 +159,18 @@ async def _generate_with_voice_cloning(text: str, language: str, output_path: Pa
             logger.warning("Voice cloning not available (TTS library not installed)")
             return None
         
+        logger.info(f"🎤 Voice cloning: generating speech ({len(text)} chars, {language})...")
+        
         result = await generate_cloned_speech(
             text=text,
             language=language,
             output_path=output_path.with_suffix('.wav')  # XTTS outputs WAV
         )
+        
+        if result:
+            logger.info(f"✅ Voice cloning successful: {result}")
+        else:
+            logger.warning(f"⚠️ Voice cloning returned None for text: '{text[:50]}...'")
         
         return result
         

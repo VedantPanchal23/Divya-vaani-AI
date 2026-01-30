@@ -20,6 +20,7 @@ function App() {
     const [isThemeTransitioning, setIsThemeTransitioning] = useState(false);
     const mediaRef = useRef(null);
     const activeSessionRef = useRef(null);  // Ref to track active session for polling
+    const pollRef = useRef(null);  // Ref to track and cancel active polls
 
     // Apply theme on mount and change with animation
     useEffect(() => {
@@ -64,9 +65,9 @@ function App() {
         }
     };
 
-    // Fetch session data when active session changes
+    // Fetch session data when active session changes (but not if we're polling)
     useEffect(() => {
-        if (activeSession) {
+        if (activeSession && !pollRef.current) {
             fetchSessionData(activeSession);
         }
     }, [activeSession]);
@@ -116,17 +117,25 @@ function App() {
 
     // Poll for processing status - auto-refresh when complete
     const pollStatus = useCallback((sessionId) => {
-        let isPolling = true;
+        // Cancel any existing poll for this session
+        if (pollRef.current) {
+            pollRef.current.cancelled = true;
+        }
+        
+        const pollContext = { cancelled: false };
+        pollRef.current = pollContext;
         
         const poll = async () => {
-            if (!isPolling) return;
+            if (pollContext.cancelled) return;
             
             try {
                 const status = await getTranscript(sessionId);
+                
+                if (pollContext.cancelled) return;
 
                 // Determine if processing is complete
                 // Backend returns status: "processing" with step field, or status: "complete"
-                const isComplete = status.status === 'complete' || 
+                const isComplete = status.status === 'complete' || status.status === 'ready' ||
                     (status.full_text && status.summary && status.status !== 'processing');
                 const isError = status.status === 'error' || status.step === 'failed';
                 const isProcessing = !isComplete && !isError;
@@ -160,15 +169,20 @@ function App() {
                     }
                 }
 
-                // If still processing, continue polling
-                if (isProcessing && isPolling) {
-                    setTimeout(poll, 2000);
+                // If still processing, continue polling (slower interval)
+                if (isProcessing && !pollContext.cancelled) {
+                    setTimeout(poll, 3000);  // 3 seconds instead of 2
                 } else if (isComplete || isError) {
-                    // Processing complete or error - fetch full session data
+                    // Processing complete or error - fetch full session data ONCE
                     console.log('Processing complete! Fetching full session data...');
                     
+                    // Clear the poll reference since we're done
+                    if (pollRef.current === pollContext) {
+                        pollRef.current = null;
+                    }
+                    
                     // Always fetch the complete data when done
-                    if (activeSessionRef.current === sessionId) {
+                    if (activeSessionRef.current === sessionId && !pollContext.cancelled) {
                         // Fetch both Hindi and English versions
                         try {
                             const [dataHi, dataEn] = await Promise.all([
@@ -209,9 +223,9 @@ function App() {
                 }
             } catch (error) {
                 console.error('Polling error:', error);
-                // Retry on error
-                if (isPolling) {
-                    setTimeout(poll, 3000);
+                // Retry on error (but don't spam)
+                if (!pollContext.cancelled) {
+                    setTimeout(poll, 5000);  // 5 seconds on error
                 }
             }
         };
@@ -220,7 +234,10 @@ function App() {
         
         // Return cleanup function
         return () => {
-            isPolling = false;
+            pollContext.cancelled = true;
+            if (pollRef.current === pollContext) {
+                pollRef.current = null;
+            }
         };
     }, []);  // No dependencies - uses ref for activeSession
 

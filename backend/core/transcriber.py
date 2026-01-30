@@ -131,11 +131,15 @@ async def _transcribe_single_chunk(file_path: Path, time_offset: float = 0.0, ma
     import asyncio
     
     last_error = None
+    file_size_mb = _get_file_size_mb(file_path)
+    logger.info(f"   📤 Uploading {file_size_mb:.1f}MB to Groq Whisper API...")
     
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            # Use shorter timeout - 120s should be enough for 10MB audio
+            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
                 with open(file_path, "rb") as f:
+                    logger.info(f"   ⏳ Waiting for Groq API response (attempt {attempt + 1}/{max_retries})...")
                     response = await client.post(
                         "https://api.groq.com/openai/v1/audio/transcriptions",
                         headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
@@ -148,6 +152,16 @@ async def _transcribe_single_chunk(file_path: Path, time_offset: float = 0.0, ma
                             "prompt": PROMPT
                         }
                     )
+            
+            logger.info(f"   📥 Got response: {response.status_code}")
+            
+            # Handle rate limiting (429)
+            if response.status_code == 429:
+                wait_time = 30  # Wait 30 seconds for rate limit
+                logger.warning(f"⚠️ Rate limited (429), waiting {wait_time}s before retry...")
+                await asyncio.sleep(wait_time)
+                last_error = "Rate limited"
+                continue
             
             # Retry on 5xx server errors
             if response.status_code >= 500:
@@ -162,6 +176,7 @@ async def _transcribe_single_chunk(file_path: Path, time_offset: float = 0.0, ma
                 raise ValueError(f"Transcription failed: {response.status_code}")
             
             result = response.json()
+            logger.info(f"   ✅ Transcribed {len(result.get('segments', []))} segments")
             
             # Adjust timestamps with offset
             segments = []
@@ -185,21 +200,28 @@ async def _transcribe_single_chunk(file_path: Path, time_offset: float = 0.0, ma
             return segments, chunk_duration
             
         except httpx.TimeoutException as e:
-            wait_time = (attempt + 1) * 5
-            logger.warning(f"⚠️ Timeout, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+            wait_time = (attempt + 1) * 10  # 10s, 20s, 30s
+            logger.error(f"❌ Timeout after 120s! Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
             await asyncio.sleep(wait_time)
-            last_error = str(e)
+            last_error = f"Timeout: {str(e)}"
+            continue
+        except httpx.ConnectError as e:
+            wait_time = (attempt + 1) * 5
+            logger.error(f"❌ Connection error: {e}. Retrying in {wait_time}s...")
+            await asyncio.sleep(wait_time)
+            last_error = f"Connection error: {str(e)}"
             continue
         except ValueError:
             raise  # Don't retry client errors (4xx)
         except Exception as e:
             wait_time = (attempt + 1) * 5
-            logger.warning(f"⚠️ Error: {e}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+            logger.error(f"❌ Error: {type(e).__name__}: {e}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
             await asyncio.sleep(wait_time)
             last_error = str(e)
             continue
     
     # All retries exhausted
+    logger.error(f"❌ Transcription failed after {max_retries} attempts: {last_error}")
     raise ValueError(f"Transcription failed after {max_retries} attempts: {last_error}")
 
 
