@@ -40,7 +40,7 @@ function VideoCard({ video, onClick }) {
                         e.target.src = 'data:image/svg+xml,' + encodeURIComponent(`
                             <svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
                                 <rect fill="#f0f2f5" width="320" height="180"/>
-                                <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#718096" font-family="sans-serif" font-size="14">🎵 Spiritual Discourse</text>
+                                <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#718096" font-family="sans-serif" font-size="14">&#9834; Divya Vaani</text>
                             </svg>
                         `);
                     }}

@@ -236,7 +236,7 @@ function Chat({ sessionId, onNewMessage }) {
         recognition.onerror = (event) => {
             console.error('[Speech] Error:', event.error, event.message);
             if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                setMicError('Microphone blocked! Click 🔒 in address bar → Allow microphone.');
+                setMicError('Microphone blocked! Click the lock icon in address bar → Allow microphone.');
                 wantListeningRef.current = false;
                 setIsListening(false);
                 stopMicMonitor();
@@ -438,7 +438,7 @@ function Chat({ sessionId, onNewMessage }) {
                             Ask anything about the speech
                         </p>
                         <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-                            {micSupported ? 'Type or tap 🎙️ — it auto-stops when you pause' : 'Type your question below'}
+                            {micSupported ? 'Type or tap the mic button — it auto-stops when you pause' : 'Type your question below'}
                         </p>
                     </div>
                 ) : (
@@ -528,7 +528,7 @@ function Chat({ sessionId, onNewMessage }) {
                     textAlign: 'center',
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <span style={{ display: 'inline-block', animation: 'pulse 1.5s infinite' }}>🎙️</span>
+                        <span style={{ display: 'inline-block', animation: 'pulse 1.5s infinite' }}><Icons.Mic size={16} /></span>
                         <span>Listening...</span>
                         <div style={{
                             width: '80px',
@@ -553,8 +553,8 @@ function Chat({ sessionId, onNewMessage }) {
                     )}
                     <div style={{ fontSize: '0.7rem', marginTop: '3px', opacity: 0.7 }}>
                         {micLevel > 5
-                            ? '🟢 Mic active — speak clearly'
-                            : '🔴 No audio — check: Windows Settings → Privacy → Microphone → Allow apps to access mic'}
+                            ? <span><span style={{color:'#27ae60'}}>●</span> Mic active — speak clearly</span>
+                            : <span><span style={{color:'#e74c3c'}}>●</span> No audio — check: Windows Settings → Privacy → Microphone → Allow apps to access mic</span>}
                     </div>
                 </div>
             )}
@@ -590,7 +590,7 @@ function Chat({ sessionId, onNewMessage }) {
                     ref={inputRef}
                     className="chat-input"
                     type="text"
-                    placeholder={isListening ? '🎙️ Listening... speak now' : (outputLanguage === 'hi' ? 'हिंदी में पूछें...' : 'Ask in Hindi or English...')}
+                    placeholder={isListening ? 'Listening... speak now' : (outputLanguage === 'hi' ? 'हिंदी में पूछें...' : 'Ask in Hindi or English...')}
                     value={isListening && interimText ? input + (input ? ' ' : '') + interimText : input}
                     onChange={(e) => { if (!isListening) setInput(e.target.value); }}
                     onKeyDown={handleKeyDown}

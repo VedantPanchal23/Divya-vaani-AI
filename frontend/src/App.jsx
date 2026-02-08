@@ -83,7 +83,7 @@ function App() {
                         <span className="header-logo-icon">
                             <Icons.Spiritual size={28} />
                         </span>
-                        <span className="header-logo-text">Spiritual Teachings AI</span>
+                        <span className="header-logo-text">Divya Vaani AI</span>
                     </div>
                     <nav className="header-nav">
                         <span className="header-badge">
@@ -121,7 +121,7 @@ function App() {
                     <span className="header-logo-icon">
                         <Icons.Spiritual size={28} />
                     </span>
-                    <span className="header-logo-text">Spiritual Teachings AI</span>
+                    <span className="header-logo-text">Divya Vaani AI</span>
                 </div>
                 <nav className="header-nav">
                     <span className="header-badge">
@@ -148,8 +148,8 @@ function App() {
             <section className="hero-section">
                 <div className="hero-content">
                     <h1 className="hero-title">
-                        <span className="hero-title-icon">🙏</span>
-                        Spiritual Discourses Collection
+                        <span className="hero-title-icon"><Icons.Spiritual size={32} /></span>
+                        Divya Vaani AI
                     </h1>
                     <p className="hero-subtitle">
                         Explore divine wisdom from Maharaj Ji's teachings. 
@@ -202,7 +202,7 @@ function App() {
                 {loading ? (
                     <div className="loading-container">
                         <Icons.Loading size={48} className="animate-spin" />
-                        <p>Loading spiritual discourses...</p>
+                        <p>Loading discourses...</p>
                     </div>
                 ) : filteredVideos.length === 0 ? (
                     <div className="empty-container">
@@ -244,7 +244,7 @@ function App() {
 
             {/* Footer */}
             <footer className="footer">
-                <p>🙏 Powered by AI for spiritual learning</p>
+                <p><Icons.Spiritual size={14} style={{display:'inline', verticalAlign:'middle', marginRight:'6px'}} />Divya Vaani AI — Powered by AI for spiritual learning</p>
             </footer>
         </div>
     );
