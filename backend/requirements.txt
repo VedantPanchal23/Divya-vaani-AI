@@ -1,0 +1,75 @@
+# ============================================================
+# Divya Vaani AI - Backend Dependencies (v3.2)
+# Python 3.11.6 | Optimized for Speed
+# ============================================================
+#
+# INSTALLATION:
+# 1. Create venv: python -m venv venv
+# 2. Activate: 
+#    - Windows: .\venv\Scripts\activate
+#    - Linux/Mac: source venv/bin/activate
+# 3. Install: pip install -r requirements.txt
+#
+# OPTIONAL (Future - Custom TTS Model):
+# Custom person-specific TTS model support coming in next version
+# ============================================================
+
+# ------------------------
+# Core FastAPI & Server
+# ------------------------
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.30.0,<1.0.0
+python-multipart>=0.0.12,<1.0.0
+pydantic>=2.9.0,<3.0.0
+pydantic-settings>=2.5.0,<3.0.0
+aiofiles>=24.1.0,<25.0.0
+slowapi>=0.1.9,<1.0.0           # Rate limiting
+
+# ------------------------
+# Groq API (LLM + Whisper) - Fast cloud inference
+# ------------------------
+groq>=0.11.0,<1.0.0
+httpx>=0.27.0,<1.0.0
+
+# ------------------------
+# Google Gemini (Summaries + Corrections)
+# ------------------------
+google-genai>=1.0.0,<2.0.0
+
+# ------------------------
+# Vector Search (FAISS + E5 Embeddings)
+# E5-small: Best multilingual retrieval for Hindi+English
+# ------------------------
+numpy>=1.26.0,<2.0.0          # NumPy 1.x required for FAISS
+faiss-cpu>=1.8.0,<2.0.0
+sentence-transformers>=3.0.0,<4.0.0
+
+# ------------------------
+# Audio Processing
+# ------------------------
+pydub>=0.25.1,<1.0.0
+
+# ------------------------
+# Text-to-Speech (Optimized for Speed)
+# Edge TTS: PRIMARY - ~1s latency, supports Hindi/English
+# gTTS: FALLBACK - Google TTS for reliability
+# Future: Custom person-specific TTS model (next version)
+# ------------------------
+edge-tts>=7.0.0,<8.0.0
+gTTS>=2.5.0,<3.0.0
+
+# ------------------------
+# Utilities
+# ------------------------
+python-dotenv>=1.0.0,<2.0.0
+
+# ============================================================
+# OPTIONAL DEPENDENCIES (install separately if needed)
+# ============================================================
+#
+# GPU Support (CUDA 11.8):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+#
+# GPU Support (CUDA 12.1):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# ============================================================

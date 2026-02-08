@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.egg-info
+backend/venv/
+backend/.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large files not needed in container
+Input/
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.webm
+yt-downloader.py
+
+# Runtime data (not needed in build)
+backend/data/uploads/
+backend/data/audio/
+backend/data/transcripts/
+backend/data/thumbnails/
+backend/training_data/
+backend/models/
+
+# Test files
+backend/test_*.py
+backend/debug_*.py
+
+# Docs (keep README for reference)
+*.md
+!README.md
+!backend/requirements.txt
