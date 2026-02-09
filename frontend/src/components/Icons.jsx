@@ -1,34 +1,34 @@
 /**
- * Icons Component - Using React Icons
- * Feather icons for a clean, professional look
+ * Icons — React Icons + Custom Spiritual SVGs
  */
 
 import {
-    // General
     FiUpload, FiSun, FiMoon, FiTrash2, FiRefreshCw, FiPlay, FiPause, FiSquare,
     FiVolume2, FiVolumeX, FiLoader, FiAlertCircle, FiCheckCircle, FiClock,
     FiChevronDown, FiChevronUp, FiChevronLeft, FiSend, FiX, FiSettings, FiInfo,
-    FiSearch, FiArrowLeft,
-
-    // Content
-    FiFileText, FiMessageCircle, FiBook, FiBookOpen, FiList, FiMic,
-    FiVideo, FiMusic, FiHeart, FiGlobe, FiZap,
-
-    // Navigation
+    FiSearch, FiArrowLeft, FiFileText, FiMessageCircle, FiBook, FiBookOpen,
+    FiList, FiMic, FiVideo, FiMusic, FiGlobe,
     FiMoreVertical, FiHelpCircle
 } from 'react-icons/fi';
 
 import {
-    // Heroicons for some extras
     HiOutlineSparkles, HiOutlineLightBulb, HiOutlineTranslate,
     HiOutlineDocumentText
 } from 'react-icons/hi';
 
-// Exported icons with consistent naming
+/* Custom OM (ॐ) symbol — a proper spiritual identity */
+const OmIcon = ({ size = 24, ...props }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+        <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
+              fontSize="18" fontWeight="700" fill="currentColor"
+              fontFamily="'Noto Sans Devanagari', serif">ॐ</text>
+    </svg>
+);
+
 export const Icons = {
-    // App - Using Heart for spiritual feel
-    Logo: (props) => <FiHeart {...props} />,
-    Spiritual: (props) => <FiHeart {...props} />,
+    // Brand
+    Logo: OmIcon,
+    Spiritual: OmIcon,
 
     // Theme
     Sun: (props) => <FiSun {...props} />,
@@ -77,7 +77,7 @@ export const Icons = {
     Sparkles: (props) => <HiOutlineSparkles {...props} />,
     Translate: (props) => <HiOutlineTranslate {...props} />,
     Speak: (props) => <FiVolume2 {...props} />,
-    AI: (props) => <FiZap {...props} />,
+    AI: (props) => <HiOutlineSparkles {...props} />,
     Globe: (props) => <FiGlobe {...props} />,
 
     // Chevrons
@@ -85,7 +85,7 @@ export const Icons = {
     ChevronUp: (props) => <FiChevronUp {...props} />,
     ChevronLeft: (props) => <FiChevronLeft {...props} />,
 
-    // Processing steps
+    // Processing
     Processing: (props) => <FiLoader {...props} />,
     Done: (props) => <FiCheckCircle {...props} />,
     Pending: (props) => <FiClock {...props} />,

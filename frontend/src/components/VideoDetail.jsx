@@ -209,7 +209,7 @@ function VideoDetail({ videoId, onBack }) {
 
                     {/* Summary Section */}
                     <div className="vd-section vd-summary-section">
-                        <div className="vd-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div className="vd-section-header">
                             <h3><Icons.Summary size={18} /> Summary</h3>
                             {currentSummary && (
                                 <TextToSpeech 
@@ -255,7 +255,7 @@ function VideoDetail({ videoId, onBack }) {
 
                     {/* Explanation Section */}
                     <div className="vd-section vd-explanation-section">
-                        <div className="vd-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div className="vd-section-header">
                             <h3><Icons.Explanation size={18} /> Explanation</h3>
                             {currentExplanation && (
                                 <TextToSpeech 

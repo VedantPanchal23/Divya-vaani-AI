@@ -388,23 +388,19 @@ function Chat({ sessionId, onNewMessage }) {
         return hindiRegex.test(text);
     };
 
+    const getMicBarColor = () => {
+        if (micLevel > 40) return '#16a34a';
+        if (micLevel > 15) return '#d97706';
+        return '#dc2626';
+    };
+
     return (
         <div className="chat-container">
-            {/* Language Selector & Clear Button */}
-            <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 'var(--spacing-sm)',
-                gap: 'var(--spacing-sm)'
-            }}>
+            {/* Controls bar */}
+            <div className="chat-controls">
                 <div className="language-selector">
-                    <label style={{
-                        fontSize: '0.75rem',
-                        color: 'var(--color-text-muted)',
-                        marginRight: 'var(--spacing-xs)'
-                    }}>
-                        <Icons.Globe size={12} style={{ marginRight: '4px' }} />
+                    <label className="language-selector-label">
+                        <Icons.Globe size={11} />
                         Output:
                     </label>
                     <select
@@ -419,11 +415,8 @@ function Chat({ sessionId, onNewMessage }) {
                 </div>
 
                 {messages.length > 0 && (
-                    <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={handleClear}
-                    >
-                        <Icons.Delete size={14} />
+                    <button className="btn btn-ghost btn-sm" onClick={handleClear}>
+                        <Icons.Delete size={13} />
                         Clear
                     </button>
                 )}
@@ -432,14 +425,23 @@ function Chat({ sessionId, onNewMessage }) {
             {/* Messages */}
             <div className="chat-messages">
                 {messages.length === 0 ? (
-                    <div className="empty-state" style={{ flex: 1 }}>
-                        <Icons.Chat size={32} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
-                        <p style={{ color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
-                            Ask anything about the speech
+                    <div className="chat-empty-state">
+                        <Icons.Chat size={28} className="chat-empty-icon" />
+                        <p className="chat-empty-text">Ask anything about this discourse</p>
+                        <p className="chat-empty-hint">
+                            {micSupported ? 'Type or use the microphone' : 'Type your question below'}
                         </p>
-                        <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-                            {micSupported ? 'Type or tap the mic button — it auto-stops when you pause' : 'Type your question below'}
-                        </p>
+                        <div className="chat-suggestions">
+                            <button className="chat-suggestion-chip" onClick={() => setInput('इसका सारांश बताइए')}>
+                                इसका सारांश बताइए
+                            </button>
+                            <button className="chat-suggestion-chip" onClick={() => setInput('What is the main teaching?')}>
+                                Main teaching?
+                            </button>
+                            <button className="chat-suggestion-chip" onClick={() => setInput('Key takeaways?')}>
+                                Key takeaways?
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     messages.map((msg) => (
@@ -447,39 +449,26 @@ function Chat({ sessionId, onNewMessage }) {
                             key={msg.id}
                             className={`chat-message ${msg.role} ${detectHindi(msg.content) ? 'hindi' : ''}`}
                         >
-                            <p style={{
-                                fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : 'inherit'
-                            }}>
+                            <p style={{ fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : undefined }}>
                                 {msg.content}
                             </p>
 
-                            {/* Relevant quotes */}
                             {msg.quotes && msg.quotes.length > 0 && (
-                                <div style={{
-                                    marginTop: 'var(--spacing-sm)',
-                                    padding: 'var(--spacing-sm)',
-                                    background: 'var(--color-bg-tertiary)',
-                                    borderRadius: 'var(--radius-sm)',
-                                    fontSize: '0.85rem',
-                                    border: '1px solid var(--border-color)'
-                                }}>
-                                    <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                        <Icons.BookOpen size={14} />
+                                <div className="chat-quote-box">
+                                    <div className="chat-quote-label">
+                                        <Icons.BookOpen size={13} />
                                         From the speech:
-                                    </strong>
+                                    </div>
                                     {msg.quotes.map((quote, i) => (
-                                        <p key={i} style={{ marginTop: '0.25rem', fontStyle: 'italic' }}>
-                                            "{quote}"
-                                        </p>
+                                        <p key={i} className="chat-quote-text">"{quote}"</p>
                                     ))}
                                 </div>
                             )}
 
-                            {/* TTS Listen Button for Assistant Messages */}
                             {msg.role === 'assistant' && !msg.isError && (
-                                <div style={{ marginTop: 'var(--spacing-sm)' }}>
-                                    <TextToSpeech 
-                                        text={msg.content} 
+                                <div className="chat-msg-tts">
+                                    <TextToSpeech
+                                        text={msg.content}
                                         lang={detectHindi(msg.content) ? 'hi' : 'en'}
                                         audioUrl={msg.audioUrl}
                                     />
@@ -491,8 +480,8 @@ function Chat({ sessionId, onNewMessage }) {
 
                 {isLoading && (
                     <div className="chat-message assistant">
-                        <div className="loading-text" style={{ gap: 'var(--spacing-sm)' }}>
-                            <Icons.Loading size={20} className="animate-spin" />
+                        <div className="chat-loading">
+                            <Icons.Loading size={18} className="animate-spin" />
                             <span>Thinking...</span>
                         </div>
                     </div>
@@ -501,89 +490,59 @@ function Chat({ sessionId, onNewMessage }) {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Mic error message */}
+            {/* Mic error */}
             {micError && (
-                <div style={{
-                    padding: '6px 12px',
-                    marginBottom: '6px',
-                    fontSize: '0.8rem',
-                    color: 'var(--color-error, #e74c3c)',
-                    background: 'var(--color-bg-tertiary)',
-                    borderRadius: 'var(--radius-sm)',
-                    textAlign: 'center'
-                }}>
-                    {micError}
-                </div>
+                <div className="chat-mic-error">{micError}</div>
             )}
 
             {/* Listening indicator */}
             {isListening && (
-                <div style={{
-                    padding: '8px 12px',
-                    marginBottom: '6px',
-                    fontSize: '0.8rem',
-                    color: 'var(--color-text-muted)',
-                    background: 'var(--color-bg-tertiary)',
-                    borderRadius: 'var(--radius-sm)',
-                    textAlign: 'center',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <span style={{ display: 'inline-block', animation: 'pulse 1.5s infinite' }}><Icons.Mic size={16} /></span>
+                <div className="chat-listening-indicator">
+                    <div className="chat-listening-row">
+                        <span className="chat-listening-icon"><Icons.Mic size={15} /></span>
                         <span>Listening...</span>
-                        <div style={{
-                            width: '80px',
-                            height: '6px',
-                            background: 'var(--color-bg-secondary, #e0e0e0)',
-                            borderRadius: '3px',
-                            overflow: 'hidden'
-                        }}>
-                            <div style={{
-                                width: `${micLevel}%`,
-                                height: '100%',
-                                background: micLevel > 40 ? '#27ae60' : micLevel > 15 ? '#f39c12' : '#e74c3c',
-                                borderRadius: '3px',
-                                transition: 'width 0.1s ease'
-                            }} />
+                        <div className="chat-listening-bar-bg">
+                            <div
+                                className="chat-listening-bar-fill"
+                                style={{ width: `${micLevel}%`, background: getMicBarColor() }}
+                            />
                         </div>
                     </div>
                     {interimText && (
-                        <div style={{ fontSize: '0.85rem', marginTop: '6px', fontStyle: 'italic', color: 'var(--color-accent-primary, #3498db)' }}>
-                            "{interimText}"
-                        </div>
+                        <div className="chat-listening-interim">"{interimText}"</div>
                     )}
-                    <div style={{ fontSize: '0.7rem', marginTop: '3px', opacity: 0.7 }}>
+                    <div className="chat-listening-status">
                         {micLevel > 5
-                            ? <span><span style={{color:'#27ae60'}}>●</span> Mic active — speak clearly</span>
-                            : <span><span style={{color:'#e74c3c'}}>●</span> No audio — check: Windows Settings → Privacy → Microphone → Allow apps to access mic</span>}
+                            ? <span><span className="dot-active">●</span> Mic active — speak clearly</span>
+                            : <span><span className="dot-inactive">●</span> No audio — check mic permissions</span>}
                     </div>
                 </div>
             )}
 
-            {/* Input with Voice */}
+            {/* Input */}
             <div className="chat-input-container">
                 {micSupported ? (
                     <button
-                        className={`btn btn-icon voice-btn ${isListening ? 'listening' : ''}`}
+                        className={`voice-btn ${isListening ? 'listening' : ''}`}
                         onClick={toggleListening}
                         title={isListening ? 'Click to stop listening' : 'Click to speak'}
                         disabled={isLoading}
                         type="button"
-                        style={isListening ? { background: '#e74c3c', color: '#fff' } : {}}
                     >
-                        <Icons.Mic size={18} />
+                        <Icons.Mic size={17} />
                     </button>
                 ) : (
                     <button
-                        className="btn btn-icon voice-btn"
+                        className="voice-btn"
                         onClick={() => {
                             setMicError('Speech recognition requires Google Chrome or Microsoft Edge browser.');
                             setTimeout(() => setMicError(null), 5000);
                         }}
                         title="Speech recognition not supported in this browser"
                         type="button"
-                        style={{ opacity: 0.4 }}
+                        disabled
                     >
-                        <Icons.Mic size={18} />
+                        <Icons.Mic size={17} />
                     </button>
                 )}
                 <input
@@ -604,7 +563,7 @@ function Chat({ sessionId, onNewMessage }) {
                     type="button"
                     title="Send message"
                 >
-                    {isLoading ? <Icons.Loading size={18} className="animate-spin" /> : <Icons.Send size={18} />}
+                    {isLoading ? <Icons.Loading size={17} className="animate-spin" /> : <Icons.Send size={17} />}
                 </button>
             </div>
         </div>
