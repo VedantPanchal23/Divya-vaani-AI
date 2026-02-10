@@ -51,8 +51,9 @@ ENV DEBUG=false
 ENV TTS_MODE=fast
 ENV HOST=0.0.0.0
 ENV NODE_ENV=production
+ENV PYTHONUNBUFFERED=1
 
-# Railway provides PORT env var
-EXPOSE ${PORT:-8000}
+# Railway dynamically assigns PORT via env var
+EXPOSE 8000
 
-CMD ["python", "run.py"]
+CMD ["python", "-u", "run.py"]

@@ -82,8 +82,10 @@ async def lifespan(app: FastAPI):
     # Initialize database (create tables)
     try:
         from db.database import init_db
-        await init_db()
+        await asyncio.wait_for(init_db(), timeout=20)
         logger.info("Database initialized")
+    except asyncio.TimeoutError:
+        logger.warning("Database init timed out after 20s — continuing without DB")
     except Exception as e:
         logger.warning(f"Database init failed: {e}")
 
@@ -94,7 +96,7 @@ async def lifespan(app: FastAPI):
         import json
         factory = _get_session_factory()
         async with factory() as db:
-            existing = await crud.get_all_videos_db(db)
+            existing = await asyncio.wait_for(crud.get_all_videos_db(db), timeout=15)
             if not existing:
                 json_path = settings.DATA_DIR / "videos_content.json"
                 if json_path.exists():
@@ -114,6 +116,8 @@ async def lifespan(app: FastAPI):
                     logger.info("No videos_content.json found — starting fresh")
             else:
                 logger.info(f"Database has {len(existing)} videos")
+    except asyncio.TimeoutError:
+        logger.warning("Video migration timed out — continuing")
     except Exception as e:
         logger.warning(f"Video migration failed: {e}")
 

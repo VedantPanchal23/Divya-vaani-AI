@@ -26,11 +26,12 @@ def _get_engine():
     if _engine is None:
         url = get_database_url()
         is_sqlite = url.startswith("sqlite")
-        connect_args = {"check_same_thread": False} if is_sqlite else {}
+        connect_args = {"check_same_thread": False} if is_sqlite else {"timeout": 10}
         _engine = create_async_engine(
             url,
             echo=False,
             pool_pre_ping=True,
+            pool_timeout=10,
             connect_args=connect_args,
         )
         db_type = "SQLite" if is_sqlite else "PostgreSQL"
