@@ -16,6 +16,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Ensure Python can import /app as a package root
+ENV PYTHONPATH=/app
+
 # Install system dependencies (ffmpeg for audio processing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
