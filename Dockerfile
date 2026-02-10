@@ -30,6 +30,9 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 COPY backend/ ./
 RUN chmod +x start.sh
 
+# Debug: show start.sh permissions and contents
+RUN ls -l /app/start.sh && head -20 /app/start.sh
+
 # Copy built frontend into static/ directory
 COPY --from=frontend-builder /app/frontend/dist ./static
 
@@ -60,3 +63,10 @@ EXPOSE 8000
 
 # Use startup script for detailed error logging
 CMD ["/bin/sh", "/app/start.sh"]
+
+# Fallback script for debugging if start.sh fails
+COPY backend/start_fallback.sh ./
+RUN chmod +x start_fallback.sh
+
+# Use a shell wrapper to try start.sh, else fallback
+CMD ["/bin/sh", "-c", "if /app/start.sh; then exit 0; else /app/start_fallback.sh; fi"]
