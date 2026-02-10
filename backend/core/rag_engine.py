@@ -8,7 +8,12 @@ import threading
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-import faiss
+
+try:
+    import faiss
+except ImportError:
+    faiss = None
+    logging.getLogger(__name__).warning("faiss-cpu not installed — RAG search disabled")
 
 from config import settings
 from data.schema import TranscriptChunk, GitaVerse, Transcript

@@ -3,6 +3,14 @@ Divya Vaani AI - Main Application
 FastAPI server for spiritual AI assistant.
 Production-ready with security, rate limiting, and cleanup.
 """
+# ── Very early diagnostics (before any app imports) ──
+import sys
+import os
+print(f"[BOOT] Python {sys.version}", flush=True)
+print(f"[BOOT] PORT={os.environ.get('PORT', 'NOT SET')}", flush=True)
+print(f"[BOOT] DATABASE_URL={'SET' if os.environ.get('DATABASE_URL') else 'NOT SET'}", flush=True)
+print(f"[BOOT] Working dir: {os.getcwd()}", flush=True)
+
 import logging
 import asyncio
 import time
@@ -14,7 +22,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from contextlib import asynccontextmanager
 
+print("[BOOT] Core stdlib imports OK", flush=True)
+
 from config import settings
+
+print(f"[BOOT] Settings loaded — PORT={settings.PORT}, HOST={settings.HOST}", flush=True)
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +40,8 @@ logger = logging.getLogger(__name__)
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from rate_limiter import limiter
+
+print("[BOOT] Rate limiter OK", flush=True)
 
 
 async def _cleanup_old_audio():
@@ -202,8 +216,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Routes
+print("[BOOT] Importing API routes...", flush=True)
 from api import router
 app.include_router(router, prefix="/api")
+print("[BOOT] API routes loaded OK", flush=True)
 
 # ── Static file serving (production / Railway) ──
 STATIC_DIR = Path(__file__).parent / "static"
@@ -250,6 +266,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 
 
 if __name__ == "__main__":
+    print(f"[BOOT] Starting uvicorn on {settings.HOST}:{settings.PORT}", flush=True)
     uvicorn.run(
         "run:app",
         host=settings.HOST,

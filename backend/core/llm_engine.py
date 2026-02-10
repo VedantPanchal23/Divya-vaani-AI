@@ -4,7 +4,12 @@ Uses Gemini for heavy tasks (summary, explanation) to avoid Groq rate limits.
 Uses Groq for fast Q&A responses.
 """
 import logging
-from groq import AsyncGroq
+
+try:
+    from groq import AsyncGroq
+except ImportError:
+    AsyncGroq = None
+    logging.getLogger(__name__).warning("groq package not installed — Q&A disabled")
 
 from config import settings
 
