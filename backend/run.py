@@ -14,7 +14,6 @@ print(f"[BOOT] Working dir: {os.getcwd()}", flush=True)
 import logging
 import asyncio
 import time
-import uvicorn
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,93 +68,100 @@ async def _cleanup_old_audio():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
-    logger.info("=" * 60)
-    logger.info(f"  {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info("=" * 60)
-    
-    # Check API keys
-    if settings.GROQ_API_KEY.get_secret_value():
-        logger.info("Groq API configured")
-    else:
-        logger.warning("GROQ_API_KEY not set! Transcription and Q&A will not work.")
-    
-    if settings.GEMINI_API_KEY.get_secret_value():
-        logger.info("Gemini API configured")
-    else:
-        logger.info("GEMINI_API_KEY not set (summaries will use Groq fallback)")
-    
-    # Security warnings
-    if not settings.ADMIN_API_KEY:
-        logger.warning("ADMIN_API_KEY not set! Upload/admin endpoints are unprotected.")
-    else:
-        logger.info("Admin API key configured")
-    
-    if settings.CORS_ORIGINS == "*":
-        logger.warning("CORS_ORIGINS='*' - restrict this in production")
-    
-    # Initialize database (create tables)
+    cleanup_task = None
     try:
-        from db.database import init_db
-        await asyncio.wait_for(init_db(), timeout=20)
-        logger.info("Database initialized")
-    except asyncio.TimeoutError:
-        logger.warning("Database init timed out after 20s — continuing without DB")
-    except Exception as e:
-        logger.warning(f"Database init failed: {e}")
+        logger.info("=" * 60)
+        logger.info(f"  {settings.APP_NAME} v{settings.APP_VERSION}")
+        logger.info("=" * 60)
+        
+        # Check API keys
+        if settings.GROQ_API_KEY.get_secret_value():
+            logger.info("Groq API configured")
+        else:
+            logger.warning("GROQ_API_KEY not set! Transcription and Q&A will not work.")
+        
+        if settings.GEMINI_API_KEY.get_secret_value():
+            logger.info("Gemini API configured")
+        else:
+            logger.info("GEMINI_API_KEY not set (summaries will use Groq fallback)")
+        
+        # Security warnings
+        if not settings.ADMIN_API_KEY:
+            logger.warning("ADMIN_API_KEY not set! Upload/admin endpoints are unprotected.")
+        else:
+            logger.info("Admin API key configured")
+        
+        if settings.CORS_ORIGINS == "*":
+            logger.warning("CORS_ORIGINS='*' - restrict this in production")
+        
+        # Initialize database (create tables)
+        try:
+            from db.database import init_db
+            await asyncio.wait_for(init_db(), timeout=20)
+            logger.info("Database initialized")
+        except asyncio.TimeoutError:
+            logger.warning("Database init timed out after 20s — continuing without DB")
+        except Exception as e:
+            logger.warning(f"Database init failed: {e}")
 
-    # Auto-migrate videos from JSON → DB if DB is empty
-    try:
-        from db.database import _get_session_factory
-        from db import crud
-        import json
-        factory = _get_session_factory()
-        async with factory() as db:
-            existing = await asyncio.wait_for(crud.get_all_videos_db(db), timeout=15)
-            if not existing:
-                json_path = settings.DATA_DIR / "videos_content.json"
-                if json_path.exists():
-                    with open(json_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    videos = list(data.values()) if isinstance(data, dict) else data
-                    migrated = 0
-                    for v in videos:
-                        if v.get("id"):
-                            try:
-                                await crud.upsert_video(db, v)
-                                migrated += 1
-                            except Exception as e:
-                                logger.warning(f"Migration skip {v.get('id')}: {e}")
-                    logger.info(f"Auto-migrated {migrated} videos from JSON → DB")
+        # Auto-migrate videos from JSON → DB if DB is empty
+        try:
+            from db.database import _get_session_factory
+            from db import crud
+            import json
+            factory = _get_session_factory()
+            async with factory() as db:
+                existing = await asyncio.wait_for(crud.get_all_videos_db(db), timeout=15)
+                if not existing:
+                    json_path = settings.DATA_DIR / "videos_content.json"
+                    if json_path.exists():
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        videos = list(data.values()) if isinstance(data, dict) else data
+                        migrated = 0
+                        for v in videos:
+                            if v.get("id"):
+                                try:
+                                    await crud.upsert_video(db, v)
+                                    migrated += 1
+                                except Exception as e:
+                                    logger.warning(f"Migration skip {v.get('id')}: {e}")
+                        logger.info(f"Auto-migrated {migrated} videos from JSON → DB")
+                    else:
+                        logger.info("No videos_content.json found — starting fresh")
                 else:
-                    logger.info("No videos_content.json found — starting fresh")
-            else:
-                logger.info(f"Database has {len(existing)} videos")
-    except asyncio.TimeoutError:
-        logger.warning("Video migration timed out — continuing")
-    except Exception as e:
-        logger.warning(f"Video migration failed: {e}")
+                    logger.info(f"Database has {len(existing)} videos")
+        except asyncio.TimeoutError:
+            logger.warning("Video migration timed out — continuing")
+        except Exception as e:
+            logger.warning(f"Video migration failed: {e}")
 
-    # Initialize video content for RAG indexing (still needed for FAISS)
-    try:
-        from data.videos_content import init_videos_content
-        init_videos_content()
-    except Exception as e:
-        logger.warning(f"Video content init failed: {e}")
-    
-    logger.info(f"TTS Mode: {settings.TTS_MODE} (gTTS + Edge TTS)")
-    logger.info(f"Server: http://localhost:{settings.PORT}")
-    logger.info(f"Docs: http://localhost:{settings.PORT}/docs")
+        # Initialize video content for RAG indexing (still needed for FAISS)
+        try:
+            from data.videos_content import init_videos_content
+            init_videos_content()
+        except Exception as e:
+            logger.warning(f"Video content init failed: {e}")
+        
+        logger.info(f"TTS Mode: {settings.TTS_MODE} (gTTS + Edge TTS)")
+        logger.info(f"Server: http://0.0.0.0:{os.environ.get('PORT', settings.PORT)}")
 
-    # Start background cleanup task
-    cleanup_task = asyncio.create_task(_cleanup_old_audio())
+        # Start background cleanup task
+        cleanup_task = asyncio.create_task(_cleanup_old_audio())
+        
+    except Exception as e:
+        logger.error(f"Startup error (app will still serve /health): {e}", exc_info=True)
     
+    # ALWAYS yield — even if startup failed, uvicorn must accept connections
+    print("[BOOT] Lifespan startup complete — yielding to uvicorn", flush=True)
     yield
     
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
     # Close database connections
     try:
@@ -266,11 +272,13 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 
 
 if __name__ == "__main__":
-    print(f"[BOOT] Starting uvicorn on {settings.HOST}:{settings.PORT}", flush=True)
+    import uvicorn
+    port = int(os.environ.get("PORT", settings.PORT))
+    print(f"[BOOT] Starting uvicorn on {settings.HOST}:{port}", flush=True)
     uvicorn.run(
         "run:app",
         host=settings.HOST,
-        port=settings.PORT,
+        port=port,
         reload=settings.DEBUG,
         reload_excludes=["data/*", "*.mp3", "*.mp4", "*.wav", "*.json"] if settings.DEBUG else None
     )

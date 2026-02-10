@@ -56,4 +56,5 @@ ENV PYTHONUNBUFFERED=1
 # Railway dynamically assigns PORT via env var
 EXPOSE 8000
 
-CMD ["python", "-u", "run.py"]
+# Use shell form so $PORT is expanded at runtime
+CMD uvicorn run:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log
