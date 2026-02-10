@@ -50,7 +50,6 @@ RUN mkdir -p /app/storage/uploads /app/storage/transcripts /app/storage/audio /a
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser \
     && chown -R appuser:appuser /app /app/storage
-USER appuser
 
 # Set production defaults
 ENV DEBUG=false
@@ -63,9 +62,6 @@ ENV STORAGE_DIR=/app/storage
 # Railway dynamically assigns PORT via env var
 EXPOSE 8000
 
-# Use startup script for detailed error logging
+# Run entrypoint as root so it can fix volume permissions,
+# then start.sh drops to appuser via su-exec / gosu
 CMD ["/bin/sh", "/app/start.sh"]
-
-
-# Use a shell wrapper to try start.sh, else fallback
-CMD ["/bin/sh", "-c", "if /app/start.sh; then exit 0; else /app/start_fallback.sh; fi"]
