@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 
 # Copy backend code
 COPY backend/ ./
+RUN chmod +x start.sh
 
 # Copy built frontend into static/ directory
 COPY --from=frontend-builder /app/frontend/dist ./static
@@ -57,5 +58,5 @@ ENV STORAGE_DIR=/app/storage
 # Railway dynamically assigns PORT via env var
 EXPOSE 8000
 
-# Use shell form so $PORT is expanded at runtime
-CMD uvicorn run:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log
+# Use startup script for detailed error logging
+CMD ["/bin/sh", "/app/start.sh"]
