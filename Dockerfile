@@ -63,9 +63,6 @@ EXPOSE 8000
 # Use startup script for detailed error logging
 CMD ["/bin/sh", "/app/start.sh"]
 
-# Fallback script for debugging if start.sh fails
-COPY backend/start_fallback.sh ./
-RUN chmod +x start_fallback.sh
 
 # Use a shell wrapper to try start.sh, else fallback
 CMD ["/bin/sh", "-c", "if /app/start.sh; then exit 0; else /app/start_fallback.sh; fi"]
