@@ -26,12 +26,11 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt \
     && pip check
 
-# Copy backend code
+# Copy backend code and scripts as root
 COPY backend/ ./
 RUN chmod +x start.sh
-
-# Debug: show start.sh permissions and contents
-RUN ls -l /app/start.sh && head -20 /app/start.sh
+COPY backend/start_fallback.sh ./
+RUN chmod +x start_fallback.sh
 
 # Copy built frontend into static/ directory
 COPY --from=frontend-builder /app/frontend/dist ./static
