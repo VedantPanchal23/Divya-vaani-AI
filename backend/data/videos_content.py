@@ -54,8 +54,8 @@ class VideoContent(BaseModel):
     tags: List[str] = []
 
 
-# Video content storage path
-VIDEOS_CONTENT_FILE = settings.DATA_DIR / "videos_content.json"
+# Video content storage path (relative to this Python package, NOT storage dir)
+VIDEOS_CONTENT_FILE = Path(__file__).parent / "videos_content.json"
 
 # In-memory cache
 _videos_cache: Optional[Dict[str, VideoContent]] = None

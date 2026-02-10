@@ -10,7 +10,15 @@ from pydantic_settings import BaseSettings
 
 # Paths
 BACKEND_DIR = Path(__file__).parent.absolute()
-DATA_DIR = BACKEND_DIR / "data"
+
+# Python package directory (schema.py, bhagavad_gita.json, etc.)
+# This must NEVER be overwritten by a volume mount.
+PACKAGE_DATA_DIR = BACKEND_DIR / "data"
+
+# User storage directory (uploads, transcripts, audio, FAISS indexes)
+# In production (Railway), set STORAGE_DIR env var and mount volume there.
+_storage_dir = os.environ.get("STORAGE_DIR")
+DATA_DIR = Path(_storage_dir) if _storage_dir else PACKAGE_DATA_DIR
 
 
 class Settings(BaseSettings):
@@ -91,7 +99,7 @@ class Settings(BaseSettings):
     
     @property
     def GITA_PATH(self) -> Path:
-        return DATA_DIR / "bhagavad_gita.json"
+        return PACKAGE_DATA_DIR / "bhagavad_gita.json"
     
     @property
     def INDEX_DIR(self) -> Path:

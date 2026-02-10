@@ -32,18 +32,18 @@ COPY backend/ ./
 # Copy built frontend into static/ directory
 COPY --from=frontend-builder /app/frontend/dist ./static
 
-# Create necessary data directories
-RUN mkdir -p data/uploads data/transcripts data/audio data/index data/thumbnails
+# Create necessary storage directories (separate from Python data/ package)
+RUN mkdir -p /app/storage/uploads /app/storage/transcripts /app/storage/audio /app/storage/index /app/storage/thumbnails
 
 # NOTE: Do NOT use VOLUME here — Railway bans it.
-# Instead, attach a Railway Volume via Dashboard -> Service -> Settings -> Volumes
-# Mount path: /app/data
+# Attach a Railway Volume via Dashboard -> Service -> Settings -> Volumes
+# Mount path: /app/storage   (NOT /app/data — that's a Python package!)
 
 # NOTE: No HEALTHCHECK here — Railway uses its own (configured in railway.toml)
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app /app/storage
 USER appuser
 
 # Set production defaults
@@ -52,6 +52,7 @@ ENV TTS_MODE=fast
 ENV HOST=0.0.0.0
 ENV NODE_ENV=production
 ENV PYTHONUNBUFFERED=1
+ENV STORAGE_DIR=/app/storage
 
 # Railway dynamically assigns PORT via env var
 EXPOSE 8000

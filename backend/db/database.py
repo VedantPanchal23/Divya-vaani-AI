@@ -26,7 +26,7 @@ def _get_engine():
     if _engine is None:
         url = get_database_url()
         is_sqlite = url.startswith("sqlite")
-        connect_args = {"check_same_thread": False} if is_sqlite else {"timeout": 10}
+        connect_args = {"check_same_thread": False} if is_sqlite else {}
         _engine = create_async_engine(
             url,
             echo=False,

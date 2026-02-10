@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
             async with factory() as db:
                 existing = await asyncio.wait_for(crud.get_all_videos_db(db), timeout=15)
                 if not existing:
-                    json_path = settings.DATA_DIR / "videos_content.json"
+                    json_path = Path(__file__).parent / "data" / "videos_content.json"
                     if json_path.exists():
                         with open(json_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
@@ -135,6 +135,21 @@ async def lifespan(app: FastAPI):
             logger.warning("Video migration timed out — continuing")
         except Exception as e:
             logger.warning(f"Video migration failed: {e}")
+
+        # Copy initial data files from package to storage (first run only)
+        try:
+            import shutil
+            from config import PACKAGE_DATA_DIR
+            storage_index = settings.INDEX_DIR
+            package_index = PACKAGE_DATA_DIR / "index"
+            if package_index.exists():
+                for f in package_index.iterdir():
+                    dest = storage_index / f.name
+                    if f.is_file() and not dest.exists():
+                        shutil.copy2(f, dest)
+                        logger.info(f"Copied {f.name} to storage index")
+        except Exception as e:
+            logger.warning(f"Index copy failed: {e}")
 
         # Initialize video content for RAG indexing (still needed for FAISS)
         try:
