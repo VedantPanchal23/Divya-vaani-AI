@@ -39,9 +39,7 @@ RUN mkdir -p data/uploads data/transcripts data/audio data/index data/thumbnails
 # Instead, attach a Railway Volume via Dashboard -> Service -> Settings -> Volumes
 # Mount path: /app/data
 
-# Health check for local Docker usage
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+# NOTE: No HEALTHCHECK here — Railway uses its own (configured in railway.toml)
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser \
@@ -55,6 +53,6 @@ ENV HOST=0.0.0.0
 ENV NODE_ENV=production
 
 # Railway provides PORT env var
-EXPOSE 8000
+EXPOSE ${PORT:-8000}
 
 CMD ["python", "run.py"]
