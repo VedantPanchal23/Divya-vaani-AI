@@ -25,11 +25,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Rate limiting
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-
-limiter = Limiter(key_func=get_remote_address)
+from rate_limiter import limiter
 
 
 async def _cleanup_old_audio():
@@ -62,12 +60,12 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     
     # Check API keys
-    if settings.GROQ_API_KEY:
+    if settings.GROQ_API_KEY.get_secret_value():
         logger.info("Groq API configured")
     else:
         logger.warning("GROQ_API_KEY not set! Transcription and Q&A will not work.")
     
-    if settings.GEMINI_API_KEY:
+    if settings.GEMINI_API_KEY.get_secret_value():
         logger.info("Gemini API configured")
     else:
         logger.info("GEMINI_API_KEY not set (summaries will use Groq fallback)")
@@ -81,11 +79,48 @@ async def lifespan(app: FastAPI):
     if settings.CORS_ORIGINS == "*":
         logger.warning("CORS_ORIGINS='*' - restrict this in production")
     
-    # Initialize video content store
+    # Initialize database (create tables)
+    try:
+        from db.database import init_db
+        await init_db()
+        logger.info("Database initialized")
+    except Exception as e:
+        logger.warning(f"Database init failed: {e}")
+
+    # Auto-migrate videos from JSON → DB if DB is empty
+    try:
+        from db.database import _get_session_factory
+        from db import crud
+        import json
+        factory = _get_session_factory()
+        async with factory() as db:
+            existing = await crud.get_all_videos_db(db)
+            if not existing:
+                json_path = settings.DATA_DIR / "videos_content.json"
+                if json_path.exists():
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    videos = list(data.values()) if isinstance(data, dict) else data
+                    migrated = 0
+                    for v in videos:
+                        if v.get("id"):
+                            try:
+                                await crud.upsert_video(db, v)
+                                migrated += 1
+                            except Exception as e:
+                                logger.warning(f"Migration skip {v.get('id')}: {e}")
+                    logger.info(f"Auto-migrated {migrated} videos from JSON → DB")
+                else:
+                    logger.info("No videos_content.json found — starting fresh")
+            else:
+                logger.info(f"Database has {len(existing)} videos")
+    except Exception as e:
+        logger.warning(f"Video migration failed: {e}")
+
+    # Initialize video content for RAG indexing (still needed for FAISS)
     try:
         from data.videos_content import init_videos_content
         init_videos_content()
-        logger.info("Video content store initialized")
     except Exception as e:
         logger.warning(f"Video content init failed: {e}")
     
@@ -103,6 +138,14 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # Close database connections
+    try:
+        from db.database import close_db
+        await close_db()
+    except Exception as e:
+        logger.warning(f"Database close failed: {e}")
+
     logger.info("Shutting down gracefully...")
 
 
@@ -124,7 +167,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True if "*" not in cors_origins else False,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Admin-Key", "Authorization"],
 )
 
@@ -138,6 +181,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'"
     if not settings.DEBUG:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
@@ -179,7 +223,7 @@ async def health():
     """Health check for Railway."""
     return {
         "status": "healthy",
-        "groq": bool(settings.GROQ_API_KEY)
+        "groq": bool(settings.GROQ_API_KEY.get_secret_value())
     }
 
 
@@ -191,10 +235,10 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         """Serve frontend SPA - catch-all for client-side routing."""
-        # Path traversal protection
+        # Path traversal protection (case-insensitive safe)
         file_path = (STATIC_DIR / full_path).resolve()
         static_resolved = STATIC_DIR.resolve()
-        if not str(file_path).startswith(str(static_resolved)):
+        if not file_path.is_relative_to(static_resolved):
             return FileResponse(STATIC_DIR / "index.html")
         if full_path and file_path.exists() and file_path.is_file():
             return FileResponse(file_path)

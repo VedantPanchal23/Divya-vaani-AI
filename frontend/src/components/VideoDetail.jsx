@@ -62,35 +62,40 @@ function VideoDetail({ videoId, onBack }) {
     const [error, setError] = useState(null);
     const [language, setLanguage] = useState('hindi'); // hindi or english
     const [generatingSummary, setGeneratingSummary] = useState(false);
-    const refreshTimersRef = useRef([]);
+    const [generateError, setGenerateError] = useState(null);
+    const pollIntervalRef = useRef(null);
 
     // Cleanup timers on unmount
     useEffect(() => {
         return () => {
-            refreshTimersRef.current.forEach(clearTimeout);
+            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
         };
     }, []);
 
-    const loadVideo = async () => {
+    const loadVideo = async (lang) => {
+        const apiLang = (lang || language) === 'english' ? 'en' : 'hi';
         setLoading(true);
         setError(null);
         
         try {
-            const [dataHi, dataEn] = await Promise.all([
-                getVideo(videoId, 'hi'),
-                getVideo(videoId, 'en')
-            ]);
+            const data = await getVideo(videoId, apiLang);
 
-            setVideo({
-                ...dataHi,
-                title_en: dataEn.title,
-                summary: {
-                    hindi: dataHi.summary_hi || dataHi.summary || '',
-                    english: dataEn.summary_en || dataEn.summary || ''
-                },
-                explanation: {
-                    hindi: dataHi.explanation_hi || dataHi.explanation || '',
-                    english: dataEn.explanation_en || dataEn.explanation || ''
+            setVideo(prev => {
+                const base = prev || {};
+                if (apiLang === 'hi') {
+                    return {
+                        ...base,
+                        ...data,
+                        summary: { ...base.summary, hindi: data.summary_hi || data.summary || '' },
+                        explanation: { ...base.explanation, hindi: data.explanation_hi || data.explanation || '' },
+                    };
+                } else {
+                    return {
+                        ...base,
+                        title_en: data.title,
+                        summary: { ...base.summary, english: data.summary_en || data.summary || '' },
+                        explanation: { ...base.explanation, english: data.explanation_en || data.explanation || '' },
+                    };
                 }
             });
         } catch (err) {
@@ -102,9 +107,19 @@ function VideoDetail({ videoId, onBack }) {
 
     useEffect(() => {
         if (videoId) {
-            loadVideo();
+            loadVideo('hindi');
         }
     }, [videoId]);
+
+    // Fetch other language content on tab switch (lazy load)
+    const handleLanguageSwitch = (lang) => {
+        setLanguage(lang);
+        const key = lang === 'english' ? 'english' : 'hindi';
+        // Only fetch if we don't already have data for this language
+        if (!video?.summary?.[key] && !video?.explanation?.[key]) {
+            loadVideo(lang);
+        }
+    };
 
     const formatDuration = (seconds) => {
         if (!seconds) return '--:--';
@@ -171,13 +186,13 @@ function VideoDetail({ videoId, onBack }) {
                 <div className="vd-lang-toggle">
                     <button 
                         className={`vd-lang-btn ${language === 'english' ? 'active' : ''}`}
-                        onClick={() => setLanguage('english')}
+                        onClick={() => handleLanguageSwitch('english')}
                     >
                         EN
                     </button>
                     <button 
                         className={`vd-lang-btn ${language === 'hindi' ? 'active' : ''}`}
-                        onClick={() => setLanguage('hindi')}
+                        onClick={() => handleLanguageSwitch('hindi')}
                     >
                         हिं
                     </button>
@@ -224,21 +239,38 @@ function VideoDetail({ videoId, onBack }) {
                             ) : (
                                 <div className="vd-empty">
                                     <p>Summary not available</p>
+                                    {generateError && (
+                                        <p className="vd-generate-error">{generateError}</p>
+                                    )}
                                     <button 
                                         className="btn btn-primary btn-sm"
                                         onClick={async () => {
                                             setGeneratingSummary(true);
+                                            setGenerateError(null);
                                             try {
                                                 await generateVideoSummary(videoId);
-                                                refreshTimersRef.current.push(
-                                                    setTimeout(() => loadVideo(), 5000),
-                                                    setTimeout(() => loadVideo(), 15000)
-                                                );
+                                                // Poll every 5s until summary appears, max 60s
+                                                let attempts = 0;
+                                                pollIntervalRef.current = setInterval(async () => {
+                                                    attempts++;
+                                                    try {
+                                                        const data = await getVideo(videoId, 'hi');
+                                                        if (data.summary_hi || data.summary || attempts >= 12) {
+                                                            clearInterval(pollIntervalRef.current);
+                                                            pollIntervalRef.current = null;
+                                                            setGeneratingSummary(false);
+                                                            loadVideo('hindi');
+                                                        }
+                                                    } catch {
+                                                        clearInterval(pollIntervalRef.current);
+                                                        pollIntervalRef.current = null;
+                                                        setGeneratingSummary(false);
+                                                    }
+                                                }, 5000);
                                             } catch (e) {
-                                                console.error('Generate failed:', e);
-                                                alert(e.message || 'Failed to generate summary. Admin access may be required.');
+                                                setGenerateError(e.message || 'Failed to generate summary. Admin access may be required.');
+                                                setGeneratingSummary(false);
                                             }
-                                            setGeneratingSummary(false);
                                         }}
                                         disabled={generatingSummary}
                                     >

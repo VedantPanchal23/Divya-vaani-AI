@@ -46,7 +46,7 @@ async def _correct_hindi_text(text: str) -> str:
     
     try:
         from google import genai
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        client = genai.Client(api_key=settings.GEMINI_API_KEY.get_secret_value())
         
         prompt = f"""You are a Hindi spelling and grammar corrector for spiritual discourse transcriptions.
 
@@ -234,7 +234,7 @@ async def _transcribe_single_chunk(file_path: Path, time_offset: float = 0.0, ma
                     logger.info(f"   ⏳ Waiting for Groq API response (attempt {attempt + 1}/{max_retries})...")
                     response = await client.post(
                         "https://api.groq.com/openai/v1/audio/transcriptions",
-                        headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                        headers={"Authorization": f"Bearer {settings.GROQ_API_KEY.get_secret_value()}"},
                         files={"file": (file_path.name, f, "audio/mpeg")},
                         data={
                             "model": "whisper-large-v3",
@@ -453,7 +453,7 @@ async def transcribe_voice(file_path: Path, language: str = None) -> str:
             
             response = await client.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                headers={"Authorization": f"Bearer {settings.GROQ_API_KEY.get_secret_value()}"},
                 files={"file": (file_path.name, f, mime_type)},
                 data=data,
             )

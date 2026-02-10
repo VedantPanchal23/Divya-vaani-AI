@@ -5,13 +5,24 @@
 
 const API_BASE = '/api';
 
+// ========== Auth Header Helper ==========
+
+function authHeaders(extraHeaders = {}) {
+    const headers = { ...extraHeaders };
+    const token = localStorage.getItem('dv_access_token');
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+}
+
 // ========== Video Content APIs ==========
 
 /**
  * Get all pre-loaded videos for the home page
  */
 export async function getVideos() {
-    const response = await fetch(`${API_BASE}/videos`);
+    const response = await fetch(`${API_BASE}/videos`, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to get videos');
     return response.json();
 }
@@ -22,7 +33,9 @@ export async function getVideos() {
  * @param {string} language - Language for content ("hi" or "en")
  */
 export async function getVideo(videoId, language = 'hi') {
-    const response = await fetch(`${API_BASE}/videos/${videoId}?language=${language}`);
+    const response = await fetch(`${API_BASE}/videos/${videoId}?language=${language}`, {
+        headers: authHeaders(),
+    });
     if (!response.ok) {
         if (response.status === 404) throw new Error('Video not found');
         throw new Error('Failed to get video');
@@ -57,7 +70,7 @@ export async function generateVideoSummary(videoId) {
 /**
  * Upload audio/video file for transcription
  */
-export async function uploadFile(file, onProgress) {
+export async function uploadFile(file) {
     const formData = new FormData();
     formData.append('file', file);
 
@@ -106,9 +119,7 @@ export async function getTranscripts() {
 export async function sendMessage(question, transcriptId = null, language = 'hi') {
     const response = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             question,
             transcript_id: transcriptId,
@@ -182,7 +193,76 @@ export async function healthCheck() {
     return response.json();
 }
 
-// Legacy API compatibility - map old names to new ones
-export const getSessions = getTranscripts;
-export const getSession = getTranscript;
-export const getUploadStatus = getTranscript;
+// ========== Favorites APIs ==========
+
+/**
+ * Get user's favorite video IDs
+ */
+export async function getFavorites() {
+    const response = await fetch(`${API_BASE}/user/favorites`, {
+        headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to get favorites');
+    return response.json();
+}
+
+/**
+ * Add a video to favorites
+ */
+export async function addFavorite(videoId) {
+    const response = await fetch(`${API_BASE}/user/favorites/${videoId}`, {
+        method: 'POST',
+        headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to add favorite');
+    return response.json();
+}
+
+/**
+ * Remove a video from favorites
+ */
+export async function removeFavorite(videoId) {
+    const response = await fetch(`${API_BASE}/user/favorites/${videoId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to remove favorite');
+    return response.json();
+}
+
+// ========== Chat History APIs ==========
+
+/**
+ * Get list of videos user has chatted with
+ */
+export async function getChatHistoryVideos() {
+    const response = await fetch(`${API_BASE}/user/chat-history`, {
+        headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to get chat history');
+    return response.json();
+}
+
+/**
+ * Get chat messages for a specific video
+ */
+export async function getChatHistory(videoId) {
+    const response = await fetch(`${API_BASE}/user/chat-history/${videoId}`, {
+        headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to get chat history');
+    return response.json();
+}
+
+/**
+ * Clear chat history for a video
+ */
+export async function clearChatHistoryApi(videoId) {
+    const response = await fetch(`${API_BASE}/user/chat-history/${videoId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to clear chat history');
+    return response.json();
+}
+

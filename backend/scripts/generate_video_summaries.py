@@ -18,7 +18,7 @@ from groq import Groq
 
 def get_groq_client():
     """Initialize Groq client."""
-    return Groq(api_key=settings.GROQ_API_KEY)
+    return Groq(api_key=settings.GROQ_API_KEY.get_secret_value())
 
 
 def generate_video_metadata(transcript: str, client) -> dict:

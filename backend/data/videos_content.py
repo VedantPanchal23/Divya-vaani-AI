@@ -5,6 +5,7 @@ Q&A is generated at runtime using RAG.
 """
 import json
 import logging
+import tempfile
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime
@@ -83,15 +84,29 @@ def _load_videos_content() -> Dict[str, VideoContent]:
 
 
 def _save_videos_content(videos: Dict[str, VideoContent]):
-    """Save all video content and update cache."""
+    """Save all video content atomically and update cache."""
     global _videos_cache
     try:
         data = {vid_id: content.model_dump() for vid_id, content in videos.items()}
-        with open(VIDEOS_CONTENT_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # Write to a temp file first, then atomically replace
+        parent_dir = VIDEOS_CONTENT_FILE.parent
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', suffix='.tmp',
+            dir=parent_dir, delete=False
+        ) as tmp_f:
+            json.dump(data, tmp_f, ensure_ascii=False, indent=2)
+            tmp_path = Path(tmp_f.name)
+        # Atomic replace — if this fails, the original file is untouched
+        tmp_path.replace(VIDEOS_CONTENT_FILE)
         _videos_cache = videos  # Update cache after successful save
     except Exception as e:
         logger.error(f"Failed to save videos content: {e}")
+        # Clean up temp file if it exists
+        try:
+            if 'tmp_path' in locals() and tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
 
 def get_all_videos() -> List[Dict[str, Any]]:

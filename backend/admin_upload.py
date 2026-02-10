@@ -16,17 +16,14 @@ import asyncio
 import argparse
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
-from data.videos_content import (
-    VideoContent, add_video_content, get_all_videos, 
-    get_video_detail, update_video_content, delete_video_content,
-    VIDEOS_CONTENT_FILE
-)
+from db.database import init_db, _get_session_factory
+from db import crud
 from core import transcriber, llm_engine, rag_engine, tts_engine
 
 logging.basicConfig(
@@ -119,36 +116,36 @@ async def process_video(file_path: Path, generate_audio: bool = False) -> VideoC
     title_hi = transcript.title[:100] if transcript.title else transcript.full_text[:100]
     title_en = summary_en.split('.')[0][:100] if summary_en else "Spiritual Discourse"
     
-    # Create VideoContent
-    video_content = VideoContent(
-        id=transcript.id,
-        title=title_en,
-        title_hi=title_hi,
-        description=f"Spiritual discourse. Duration: {int(transcript.duration/60)} minutes.",
-        description_hi="महाराज जी का आध्यात्मिक प्रवचन",
-        thumbnail=f"/api/thumbnail/{transcript.id}",
-        video_url=None,
-        duration=transcript.duration,
-        transcript=transcript.full_text,
-        transcript_chunks=[{
+    # Build video data dict
+    video_data = {
+        "id": transcript.id,
+        "title": title_en,
+        "title_hi": title_hi,
+        "description": f"Spiritual discourse. Duration: {int(transcript.duration/60)} minutes.",
+        "description_hi": "महाराज जी का आध्यात्मिक प्रवचन",
+        "thumbnail": f"/api/thumbnail/{transcript.id}",
+        "video_url": None,
+        "duration": transcript.duration,
+        "transcript": transcript.full_text,
+        "transcript_chunks": [{
             "id": c.id,
             "text": c.text,
             "start_time": c.start_time,
             "end_time": c.end_time
         } for c in transcript.chunks],
-        summary_hi=summary_hi,
-        summary_en=summary_en,
-        explanation_hi=explanation_hi,
-        explanation_en=explanation_en,
-        summary_audio_hi=summary_audio_hi,
-        summary_audio_en=summary_audio_en,
-        explanation_audio_hi=explanation_audio_hi,
-        explanation_audio_en=explanation_audio_en,
-        created_at=datetime.now().isoformat(),
-        category="pravachan",
-        speaker="Maharaj Ji",
-        tags=["spiritual", "pravachan", "hindi"]
-    )
+        "summary_hi": summary_hi,
+        "summary_en": summary_en,
+        "explanation_hi": explanation_hi,
+        "explanation_en": explanation_en,
+        "summary_audio_hi": summary_audio_hi,
+        "summary_audio_en": summary_audio_en,
+        "explanation_audio_hi": explanation_audio_hi,
+        "explanation_audio_en": explanation_audio_en,
+        "created_at": datetime.now(timezone.utc),
+        "category": "pravachan",
+        "speaker": "Maharaj Ji",
+        "tags": ["spiritual", "pravachan", "hindi"],
+    }
     
     # Index for RAG search
     print("\n📚 Indexing for search...")
@@ -158,8 +155,10 @@ async def process_video(file_path: Path, generate_audio: bool = False) -> VideoC
     except Exception as e:
         print(f"   ⚠️ Indexing failed: {e}")
     
-    # Save to video content store
-    add_video_content(video_content)
+    # Save to DB
+    factory = _get_session_factory()
+    async with factory() as db:
+        video = await crud.upsert_video(db, video_data)
     
     print(f"\n{'='*60}")
     print(f"✅ SUCCESS: {transcript.id}")
@@ -167,18 +166,21 @@ async def process_video(file_path: Path, generate_audio: bool = False) -> VideoC
     print(f"   Duration: {int(transcript.duration/60)}m {int(transcript.duration%60)}s")
     print(f"{'='*60}\n")
     
-    return video_content
+    return video
 
 
 async def regenerate_content(video_id: str, generate_audio: bool = False):
     """Regenerate summary and explanation for an existing video."""
     
-    video = get_video_detail(video_id, "hi")
+    factory = _get_session_factory()
+    async with factory() as db:
+        video = await crud.get_video_by_id(db, video_id)
+    
     if not video:
         print(f"❌ Video not found: {video_id}")
         return
     
-    transcript = video.get("transcript", "")
+    transcript = video.transcript or ""
     if not transcript:
         print(f"❌ No transcript found for: {video_id}")
         return
@@ -218,8 +220,10 @@ async def regenerate_content(video_id: str, generate_audio: bool = False):
         except Exception as e:
             print(f"   ⚠️ Audio failed: {e}")
     
-    # Update
-    update_video_content(video_id, updates)
+    # Update in DB
+    factory = _get_session_factory()
+    async with factory() as db:
+        await crud.update_video_fields(db, video_id, updates)
     print(f"\n✅ Regenerated: {video_id}")
 
 
@@ -246,45 +250,47 @@ async def process_folder(folder_path: Path, generate_audio: bool = False):
     print(f"\n✅ Processed {len(files)} files")
 
 
-def list_videos():
-    """List all videos in the content store."""
+async def list_videos():
+    """List all videos in the DB."""
+    factory = _get_session_factory()
+    async with factory() as db:
+        db_videos = await crud.get_all_videos_db(db)
     
-    videos = get_all_videos()
-    
-    if not videos:
-        print("📭 No videos in content store")
+    if not db_videos:
+        print("📭 No videos in database")
         return
     
-    print(f"\n📚 {len(videos)} Videos in Content Store\n")
+    print(f"\n📚 {len(db_videos)} Videos in Database\n")
     print(f"{'ID':<15} {'Duration':<10} {'Has Summary':<12} {'Title'}")
     print("-" * 80)
     
-    for v in videos:
-        video_id = v.get('id', 'N/A')[:12]
-        duration = v.get('duration', 0)
+    for v in db_videos:
+        video_id = (v.id or 'N/A')[:12]
+        duration = v.duration or 0
         duration_str = f"{int(duration/60)}m {int(duration%60)}s"
-        
-        # Check if has summary
-        detail = get_video_detail(v.get('id'), 'hi')
-        has_summary = "✅" if detail and detail.get('summary_hi') else "❌"
-        
-        title = v.get('title_hi', v.get('title', 'N/A'))[:40]
-        
+        has_summary = "✅" if v.summary_hi else "❌"
+        title = (v.title_hi or v.title or 'N/A')[:40]
         print(f"{video_id:<15} {duration_str:<10} {has_summary:<12} {title}")
     
     print()
 
 
-def delete_video(video_id: str):
-    """Delete a video from the content store."""
+async def delete_video(video_id: str):
+    """Delete a video from the DB."""
+    factory = _get_session_factory()
+    async with factory() as db:
+        result = await crud.delete_video_db(db, video_id)
     
-    if delete_video_content(video_id):
+    if result:
         print(f"✅ Deleted: {video_id}")
     else:
         print(f"❌ Video not found: {video_id}")
 
 
 async def main():
+    # Initialize DB tables
+    await init_db()
+    
     parser = argparse.ArgumentParser(
         description="Admin tool for uploading and processing videos",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -311,12 +317,12 @@ Examples:
     
     # List videos
     if args.list:
-        list_videos()
+        await list_videos()
         return
     
     # Delete video
     if args.delete:
-        delete_video(args.delete)
+        await delete_video(args.delete)
         return
     
     # Regenerate

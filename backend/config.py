@@ -3,7 +3,9 @@ Divya Vaani AI - Configuration
 Simple, clean configuration using environment variables.
 """
 import os
+import secrets
 from pathlib import Path
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings
 
 # Paths
@@ -31,11 +33,20 @@ class Settings(BaseSettings):
     RATE_LIMIT_UPLOAD: str = "5/hour"   # Rate limit for upload endpoint
     MAX_UPLOAD_SIZE_MB: int = 500       # Max upload file size in MB
     
+    # Database
+    DATABASE_URL: str = ""  # PostgreSQL: postgresql+asyncpg://user:pass@host/db  (empty = SQLite fallback)
+    
+    # JWT Authentication
+    JWT_SECRET_KEY: SecretStr = SecretStr("")  # Auto-generated if empty
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    
     # Groq API (Transcription + Fast Q&A)
-    GROQ_API_KEY: str = ""
+    GROQ_API_KEY: SecretStr = SecretStr("")
     
     # Gemini API (Summary + Explanation - better for long content)
-    GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY: SecretStr = SecretStr("")
     
     # LLM Settings
     LLM_MODEL: str = "llama-3.3-70b-versatile"  # For summaries/explanations (quality)
@@ -107,3 +118,54 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# === Startup Validation ===
+import os as _os
+
+# In production (not DEBUG), ADMIN_API_KEY must be set to protect admin endpoints
+if not settings.DEBUG and not settings.ADMIN_API_KEY:
+    _generated = secrets.token_urlsafe(32)
+    settings.ADMIN_API_KEY = _generated
+    import warnings
+    warnings.warn(
+        "\n" + "=" * 60 + "\n"
+        "  WARNING: ADMIN_API_KEY was not set!\n"
+        f"  Auto-generated key: {_generated}\n"
+        "  Set ADMIN_API_KEY env var for production.\n"
+        + "=" * 60,
+        stacklevel=1
+    )
+
+if settings.CORS_ORIGINS == "*" and not settings.DEBUG:
+    import warnings
+    warnings.warn(
+        "CORS_ORIGINS='*' in production — restrict to your frontend domain.",
+        stacklevel=1
+    )
+
+# Auto-generate JWT secret if not provided
+if not settings.JWT_SECRET_KEY.get_secret_value():
+    _jwt_secret = secrets.token_urlsafe(64)
+    settings.JWT_SECRET_KEY = SecretStr(_jwt_secret)
+    if not settings.DEBUG:
+        import warnings
+        warnings.warn(
+            "JWT_SECRET_KEY not set — auto-generated (tokens won't survive restarts). "
+            "Set JWT_SECRET_KEY env var for production.",
+            stacklevel=1
+        )
+
+# Compute async database URL
+def get_database_url() -> str:
+    """Return the async database URL, falling back to SQLite."""
+    if settings.DATABASE_URL:
+        url = settings.DATABASE_URL
+        # Convert postgres:// to postgresql+asyncpg://
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+    # Fallback to SQLite
+    db_path = DATA_DIR / "divyavaani.db"
+    return f"sqlite+aiosqlite:///{db_path}"

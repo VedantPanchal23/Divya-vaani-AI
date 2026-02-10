@@ -92,11 +92,18 @@ def normalize_devanagari(text: str) -> str:
     # Unicode NFC normalization
     text = unicodedata.normalize('NFC', text)
     
-    # Normalize chandrabindu variations
-    text = text.replace('ँ', 'ं')  # Some fonts use different chandrabindu
+    # NOTE: Chandrabindu (ँ) and Anusvara (ं) are linguistically distinct.
+    # ँ indicates nasalization (e.g., हँसी = laughter)
+    # ं is a different nasal (e.g., हंसी = swan-related)
+    # We preserve both to maintain correct pronunciation.
     
-    # Normalize nukta variations
-    text = re.sub(r'([क-ह])़', r'\1़', text)
+    # Normalize nukta: combine base consonant + standalone nukta into single char
+    nukta_map = {
+        'क़': 'क़', 'ख़': 'ख़', 'ग़': 'ग़', 'ज़': 'ज़',
+        'ड़': 'ड़', 'ढ़': 'ढ़', 'फ़': 'फ़',
+    }
+    for composite, normalized in nukta_map.items():
+        text = text.replace(composite, normalized)
     
     # Fix common OCR/transcription errors
     replacements = {

@@ -35,6 +35,13 @@ COPY --from=frontend-builder /app/frontend/dist ./static
 # Create necessary data directories
 RUN mkdir -p data/uploads data/transcripts data/audio data/index data/thumbnails
 
+# Declare persistent data volume — mount this in Railway/Docker to persist across deploys
+VOLUME ["/app/data"]
+
+# Health check for local Docker usage
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser \
     && chown -R appuser:appuser /app

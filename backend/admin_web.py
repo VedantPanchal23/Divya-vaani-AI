@@ -7,25 +7,28 @@ import os
 import sys
 import asyncio
 import logging
+import secrets
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+from html import escape as html_escape
+from contextlib import asynccontextmanager
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from config import settings
-from data.videos_content import (
-    VideoContent, add_video_content, get_all_videos, 
-    get_video_detail, update_video_content, delete_video_content
-)
+from db.database import get_db, init_db, _get_session_factory
+from db import crud
+from db.models import Video
+from sqlalchemy.ext.asyncio import AsyncSession
 from core import transcriber, llm_engine, rag_engine
 
 logging.basicConfig(
@@ -34,15 +37,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Divya Vaani Admin", docs_url="/docs")
+@asynccontextmanager
+async def admin_lifespan(app: FastAPI):
+    """Initialize DB on startup."""
+    await init_db()
+    logger.info("Admin: Database initialized")
+    yield
 
+app = FastAPI(title="Divya Vaani Admin", docs_url="/docs", lifespan=admin_lifespan)
+
+# CORS - use configured origins, never wildcard with credentials
+cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=True if "*" not in cors_origins else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _verify_admin_key(x_admin_key: Optional[str] = Header(None)):
+    """Verify admin API key for protected endpoints."""
+    if not settings.ADMIN_API_KEY:
+        raise HTTPException(403, "Admin access disabled: ADMIN_API_KEY not configured.")
+    if not x_admin_key or not secrets.compare_digest(x_admin_key, settings.ADMIN_API_KEY):
+        raise HTTPException(403, "Invalid or missing admin API key.")
 
 # Upload directory
 UPLOAD_DIR = settings.DATA_DIR / "uploads"
@@ -155,38 +175,41 @@ async def process_video_task(file_path: Path, video_id: str, original_filename: 
         title_hi = clean_title  # Use original filename
         title_en = clean_title  # Use original filename
         
-        video_content = VideoContent(
-            id=transcript.id,
-            title=title_en,
-            title_hi=title_hi,
-            description=f"Spiritual discourse. Duration: {int(transcript.duration/60)} minutes.",
-            description_hi="महाराज जी का आध्यात्मिक प्रवचन",
-            thumbnail=f"/api/thumbnail/{transcript.id}",
-            video_url=f"/api/video/{transcript.id}",  # Serve uploaded video
-            duration=transcript.duration,
-            transcript=transcript.full_text,
-            transcript_chunks=[{
+        video_data = {
+            "id": transcript.id,
+            "title": title_en,
+            "title_hi": title_hi,
+            "description": f"Spiritual discourse. Duration: {int(transcript.duration/60)} minutes.",
+            "description_hi": "महाराज जी का आध्यात्मिक प्रवचन",
+            "thumbnail": f"/api/thumbnail/{transcript.id}",
+            "video_url": f"/api/video/{transcript.id}",
+            "duration": transcript.duration,
+            "transcript": transcript.full_text,
+            "transcript_chunks": [{
                 "id": c.id,
                 "text": c.text,
                 "start_time": c.start_time,
                 "end_time": c.end_time
             } for c in transcript.chunks],
-            summary_hi=summary_hi,
-            summary_en=summary_en,
-            explanation_hi=explanation_hi,
-            explanation_en=explanation_en,
-            main_topic=themes_data.get("main_topic", ""),
-            main_topic_en=themes_data.get("main_topic_en", ""),
-            themes=themes_data.get("themes", []),
-            themes_en=themes_data.get("themes_en", []),
-            key_teachings=themes_data.get("key_teachings", []),
-            created_at=datetime.now().isoformat(),
-            category="pravachan",
-            speaker="Maharaj Ji",
-            tags=["spiritual", "pravachan", "hindi"]
-        )
-        
-        add_video_content(video_content)
+            "summary_hi": summary_hi,
+            "summary_en": summary_en,
+            "explanation_hi": explanation_hi,
+            "explanation_en": explanation_en,
+            "main_topic": themes_data.get("main_topic", ""),
+            "main_topic_en": themes_data.get("main_topic_en", ""),
+            "themes": themes_data.get("themes", []),
+            "themes_en": themes_data.get("themes_en", []),
+            "key_teachings": themes_data.get("key_teachings", []),
+            "created_at": datetime.now(timezone.utc),
+            "category": "pravachan",
+            "speaker": "Maharaj Ji",
+            "tags": ["spiritual", "pravachan", "hindi"],
+        }
+
+        # Save to DB
+        factory = _get_session_factory()
+        async with factory() as db:
+            await crud.upsert_video(db, video_data)
         
         processing_status[video_id] = {
             "status": "complete", 
@@ -204,21 +227,21 @@ async def process_video_task(file_path: Path, video_id: str, original_filename: 
 
 
 @app.get("/", response_class=HTMLResponse)
-async def admin_home():
+async def admin_home(db: AsyncSession = Depends(get_db)):
     """Admin dashboard HTML."""
-    videos = get_all_videos()
+    db_videos = await crud.get_all_videos_db(db)
+    videos = [crud.video_to_card(v) for v in db_videos]
     
     video_rows = ""
     for v in videos:
         vid_id = v['id'][:12]
-        detail = get_video_detail(v['id'], 'hi')
-        has_summary = "✅" if detail and detail.get('summary_hi') else "❌"
+        has_summary = "✅" if any(vid.summary_hi for vid in db_videos if vid.id == v['id']) else "❌"
         duration = f"{int(v['duration']/60)}m {int(v['duration']%60)}s"
-        title = v.get('title_hi', v.get('title', 'N/A'))[:50]
+        title = html_escape(v.get('title_hi', v.get('title', 'N/A'))[:50])
         
         video_rows += f"""
         <tr>
-            <td><code>{vid_id}</code></td>
+            <td><code>{html_escape(vid_id)}</code></td>
             <td>{title}</td>
             <td>{duration}</td>
             <td>{has_summary}</td>
@@ -323,6 +346,17 @@ async def admin_home():
         </div>
         
         <script>
+            // Admin key - prompt once, store in sessionStorage
+            let adminKey = sessionStorage.getItem('adminKey');
+            if (!adminKey) {{
+                adminKey = prompt('Enter Admin API Key:');
+                if (adminKey) sessionStorage.setItem('adminKey', adminKey);
+            }}
+            
+            function authHeaders() {{
+                return {{ 'X-Admin-Key': adminKey || '' }};
+            }}
+            
             const dropZone = document.getElementById('dropZone');
             
             dropZone.addEventListener('dragover', (e) => {{
@@ -357,7 +391,8 @@ async def admin_home():
                 try {{
                     const response = await fetch('/upload', {{
                         method: 'POST',
-                        body: formData
+                        body: formData,
+                        headers: authHeaders()
                     }});
                     
                     const data = await response.json();
@@ -413,7 +448,7 @@ async def admin_home():
                 statusText.className = 'status';
                 
                 try {{
-                    const response = await fetch(`/regenerate/${{videoId}}`, {{ method: 'POST' }});
+                    const response = await fetch(`/regenerate/${{videoId}}`, {{ method: 'POST', headers: authHeaders() }});
                     const data = await response.json();
                     
                     if (response.ok) {{
@@ -433,7 +468,7 @@ async def admin_home():
                 if (!confirm('Delete this video permanently?')) return;
                 
                 try {{
-                    const response = await fetch(`/delete/${{videoId}}`, {{ method: 'DELETE' }});
+                    const response = await fetch(`/delete/${{videoId}}`, {{ method: 'DELETE', headers: authHeaders() }});
                     if (response.ok) {{
                         location.reload();
                     }} else {{
@@ -450,9 +485,9 @@ async def admin_home():
     """
 
 
-@app.post("/upload")
+@app.post("/upload", dependencies=[Depends(_verify_admin_key)])
 async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    """Upload and process a video file."""
+    """Upload and process a video file. Requires X-Admin-Key header."""
     
     # Validate file type
     valid_extensions = {'.mp3', '.mp4', '.wav', '.m4a', '.webm', '.ogg', '.flac'}
@@ -465,14 +500,19 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
     import uuid
     video_id = str(uuid.uuid4())[:12]
     
-    # Save file
+    # Save file using chunked streaming (prevents OOM on large files)
     file_path = UPLOAD_DIR / f"{video_id}{ext}"
     
-    with open(file_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+    try:
+        with open(file_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                f.write(chunk)
+    except Exception as e:
+        # Clean up partial file
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(500, "Failed to save uploaded file")
     
-    logger.info(f"📥 Uploaded: {file.filename} -> {file_path}")
+    logger.info(f"Uploaded: {file.filename} -> {file_path}")
     
     # Start background processing - pass original filename for title
     background_tasks.add_task(process_video_task, file_path, video_id, file.filename)
@@ -487,15 +527,15 @@ async def get_processing_status(video_id: str):
     return status
 
 
-@app.post("/regenerate/{video_id}")
-async def regenerate_video(video_id: str):
+@app.post("/regenerate/{video_id}", dependencies=[Depends(_verify_admin_key)])
+async def regenerate_video(video_id: str, db: AsyncSession = Depends(get_db)):
     """Regenerate summary and explanation for existing video."""
     
-    video = get_video_detail(video_id, "hi")
+    video = await crud.get_video_by_id(db, video_id)
     if not video:
         raise HTTPException(404, "Video not found")
     
-    transcript = video.get("transcript", "")
+    transcript = video.transcript or ""
     if not transcript:
         raise HTTPException(400, "No transcript available")
     
@@ -505,8 +545,8 @@ async def regenerate_video(video_id: str):
     explanation_hi = await llm_engine.generate_explanation(transcript, "hi")
     explanation_en = await llm_engine.generate_explanation(transcript, "en")
     
-    # Update
-    update_video_content(video_id, {
+    # Update in DB
+    await crud.update_video_fields(db, video_id, {
         "summary_hi": summary_hi,
         "summary_en": summary_en,
         "explanation_hi": explanation_hi,
@@ -516,20 +556,28 @@ async def regenerate_video(video_id: str):
     return {"message": "Content regenerated successfully"}
 
 
-@app.delete("/delete/{video_id}")
-async def delete_video(video_id: str):
-    """Delete a video from the content store."""
+@app.delete("/delete/{video_id}", dependencies=[Depends(_verify_admin_key)])
+async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a video from the DB."""
     
-    if not delete_video_content(video_id):
+    if not await crud.delete_video_db(db, video_id):
         raise HTTPException(404, "Video not found")
+    
+    # Clean up files
+    for pattern in [f"{video_id}.*", f"{video_id}.jpg"]:
+        for f in (settings.DATA_DIR / "uploads").glob(pattern):
+            f.unlink(missing_ok=True)
+        for f in (settings.DATA_DIR / "thumbnails").glob(pattern):
+            f.unlink(missing_ok=True)
     
     return {"message": "Video deleted"}
 
 
 @app.get("/api/videos")
-async def list_videos():
+async def list_videos(db: AsyncSession = Depends(get_db)):
     """API: List all videos."""
-    return get_all_videos()
+    videos = await crud.get_all_videos_db(db)
+    return [crud.video_to_card(v) for v in videos]
 
 
 if __name__ == "__main__":

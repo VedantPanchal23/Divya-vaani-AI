@@ -1,6 +1,9 @@
 import { Icons } from './Icons';
+import { useAuth } from './AuthContext';
+import { addFavorite, removeFavorite } from '../api';
 
-function VideoCard({ video, onClick }) {
+function VideoCard({ video, onClick, isFavorited, onFavoriteToggle }) {
+    const { isAuthenticated } = useAuth();
     const formatDuration = (seconds) => {
         if (!seconds) return '--:--';
         const mins = Math.floor(seconds / 60);
@@ -17,6 +20,22 @@ function VideoCard({ video, onClick }) {
         if (!text) return '';
         if (text.length <= maxLength) return text;
         return text.substring(0, maxLength).trim() + '...';
+    };
+
+    const handleFavoriteClick = async (e) => {
+        e.stopPropagation();
+        if (!isAuthenticated) return;
+        try {
+            if (isFavorited) {
+                await removeFavorite(video.id);
+                onFavoriteToggle?.(video.id, false);
+            } else {
+                await addFavorite(video.id);
+                onFavoriteToggle?.(video.id, true);
+            }
+        } catch (err) {
+            console.error('Favorite toggle failed:', err);
+        }
     };
 
     return (
@@ -36,6 +55,7 @@ function VideoCard({ video, onClick }) {
                 <img 
                     src={video.thumbnail || '/api/thumbnail/default'} 
                     alt={video.title}
+                    loading="lazy"
                     onError={(e) => {
                         e.target.src = 'data:image/svg+xml,' + encodeURIComponent(`
                             <svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
@@ -52,6 +72,16 @@ function VideoCard({ video, onClick }) {
                 <div className="video-card-play-overlay">
                     <Icons.Play size={40} />
                 </div>
+                {isAuthenticated && (
+                    <button
+                        className={`video-card-fav ${isFavorited ? 'favorited' : ''}`}
+                        onClick={handleFavoriteClick}
+                        title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+                        aria-label={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                        <Icons.Heart size={16} />
+                    </button>
+                )}
             </div>
             
             <div className="video-card-content">

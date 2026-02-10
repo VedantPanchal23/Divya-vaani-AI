@@ -18,7 +18,7 @@ def get_groq_client() -> AsyncGroq:
     """Get Groq client - used for fast Q&A."""
     global _groq_client
     if _groq_client is None:
-        _groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        _groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY.get_secret_value())
         logger.info("✅ Groq client initialized")
     return _groq_client
 
@@ -29,7 +29,7 @@ def get_gemini_client():
     if _gemini_client is None:
         try:
             from google import genai
-            _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY.get_secret_value())
             logger.info("✅ Gemini client initialized (google-genai, gemini-2.0-flash)")
         except Exception as e:
             logger.error(f"❌ Failed to initialize Gemini: {e}")
@@ -71,17 +71,41 @@ DO:
 """
 
 
+def _sanitize_user_input(text: str) -> str:
+    """Sanitize user input to prevent prompt injection attacks."""
+    # Remove common prompt injection patterns
+    injection_patterns = [
+        r'(?i)ignore\s+(all\s+)?previous\s+instructions',
+        r'(?i)forget\s+(all\s+)?previous',
+        r'(?i)disregard\s+(all\s+)?above',
+        r'(?i)override\s+(system|previous)',
+        r'(?i)you\s+are\s+now\s+',
+        r'(?i)act\s+as\s+(?!a\s+spiritual)',
+        r'(?i)new\s+instructions?:',
+        r'(?i)system\s*:\s*',
+        r'(?i)\[\s*system\s*\]',
+        r'(?i)\<\s*system\s*\>',
+    ]
+    import re
+    for pattern in injection_patterns:
+        text = re.sub(pattern, '[filtered]', text)
+    return text.strip()
+
+
 async def generate_answer(question: str, context: str, source_type, language: str = "hi") -> str:
     """Generate answer from context using Groq (fast model for low latency)."""
     try:
         client = get_groq_client()
+        
+        # Sanitize user input to prevent prompt injection
+        safe_question = _sanitize_user_input(question)
         
         lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
         
         prompt = f"""SPIRITUAL DISCOURSE CONTEXT (from Maharaj Ji's {source_type.value}):
 {context}
 
-USER'S QUESTION/CONCERN: {question}
+USER'S QUESTION/CONCERN: {safe_question}
 
 {lang_instruction}
 

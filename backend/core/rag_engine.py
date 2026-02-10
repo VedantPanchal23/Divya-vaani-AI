@@ -4,6 +4,7 @@ FAISS-based semantic search for transcripts and Bhagavad Gita.
 """
 import json
 import logging
+import threading
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -21,15 +22,22 @@ _transcript_meta = []
 _gita_index = None
 _gita_verses = []
 
+# Thread safety locks
+_transcript_lock = threading.Lock()
+_gita_lock = threading.Lock()
+_embedder_lock = threading.Lock()
+
 
 def get_embedder():
-    """Get sentence transformer model."""
+    """Get sentence transformer model (thread-safe)."""
     global _embedder
     if _embedder is None:
-        from sentence_transformers import SentenceTransformer
-        logger.info(f"Loading {settings.EMBEDDING_MODEL}...")
-        _embedder = SentenceTransformer(settings.EMBEDDING_MODEL)
-        logger.info("✅ Embedder loaded")
+        with _embedder_lock:
+            if _embedder is None:  # double-check
+                from sentence_transformers import SentenceTransformer
+                logger.info(f"Loading {settings.EMBEDDING_MODEL}...")
+                _embedder = SentenceTransformer(settings.EMBEDDING_MODEL)
+                logger.info("✅ Embedder loaded")
     return _embedder
 
 
@@ -60,34 +68,64 @@ def _normalize(vectors: np.ndarray) -> np.ndarray:
 # ========== Transcript Index ==========
 
 def index_transcript(transcript: Transcript):
-    """Add transcript chunks to the index."""
+    """Add transcript chunks to the index (with duplicate detection, thread-safe)."""
     global _transcript_index, _transcript_meta
     
     if not transcript.chunks:
         return
     
-    _load_transcript_index()
+    with _transcript_lock:
+        _load_transcript_index()
+        
+        # Check for duplicate transcript — remove old entries before re-indexing
+        existing_ids = {m["transcript_id"] for m in _transcript_meta}
+        if transcript.id in existing_ids:
+            logger.info(f"Transcript {transcript.id} already indexed — removing old entries before re-indexing")
+            _remove_transcript_from_index(transcript.id)
+        
+        # Embed chunks (as passages, not queries)
+        texts = [c.text for c in transcript.chunks]
+        embeddings = _embed_text(texts, is_query=False)
     
-    # Embed chunks (as passages, not queries)
-    texts = [c.text for c in transcript.chunks]
-    embeddings = _embed_text(texts, is_query=False)
+        # Add to index
+        _transcript_index.add(embeddings)
+        
+        # Store metadata
+        for chunk in transcript.chunks:
+            _transcript_meta.append({
+                "chunk_id": chunk.id,
+                "transcript_id": transcript.id,
+                "text": chunk.text,
+                "start_time": chunk.start_time,
+                "end_time": chunk.end_time
+            })
+        
+        # Save
+        _save_transcript_index()
+        logger.info(f"Indexed {len(texts)} chunks from {transcript.filename}")
+
+
+def _remove_transcript_from_index(transcript_id: str):
+    """Remove all entries for a transcript and rebuild the FAISS index."""
+    global _transcript_index, _transcript_meta
     
-    # Add to index
-    _transcript_index.add(embeddings)
+    # Filter out old entries
+    new_meta = [m for m in _transcript_meta if m["transcript_id"] != transcript_id]
+    removed_count = len(_transcript_meta) - len(new_meta)
     
-    # Store metadata
-    for chunk in transcript.chunks:
-        _transcript_meta.append({
-            "chunk_id": chunk.id,
-            "transcript_id": transcript.id,
-            "text": chunk.text,
-            "start_time": chunk.start_time,
-            "end_time": chunk.end_time
-        })
+    if removed_count == 0:
+        return
     
-    # Save
-    _save_transcript_index()
-    logger.info(f"📚 Indexed {len(texts)} chunks from {transcript.filename}")
+    # Rebuild index from remaining metadata
+    _transcript_index = faiss.IndexFlatIP(settings.EMBEDDING_DIM)
+    
+    if new_meta:
+        texts = [m["text"] for m in new_meta]
+        embeddings = _embed_text(texts, is_query=False)
+        _transcript_index.add(embeddings)
+    
+    _transcript_meta = new_meta
+    logger.info(f"Removed {removed_count} old entries for transcript {transcript_id}")
 
 
 def search_transcripts(query: str, transcript_id: str = None, top_k: int = 10) -> List[TranscriptChunk]:
@@ -108,58 +146,59 @@ def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k:
     """
     global _transcript_meta
     
-    _load_transcript_index()
-    
-    if _transcript_index.ntotal == 0:
-        return []
-    
-    # Embed query (with query prefix for E5)
-    q_emb = _embed_text([query], is_query=True)
-    
-    # If filtering by transcript_id, search more aggressively
-    # because we need to find results in that specific transcript
-    if transcript_id:
-        # Search through more results to find matches for this transcript
-        k = min(500, _transcript_index.ntotal)  # Search more when filtering
-    else:
-        k = min(top_k * 5, _transcript_index.ntotal)
-    
-    scores, indices = _transcript_index.search(q_emb, k)
-    
-    results = []
-    for i, idx in enumerate(indices[0]):
-        if idx < 0 or idx >= len(_transcript_meta):
-            continue
+    with _transcript_lock:
+        _load_transcript_index()
         
-        meta = _transcript_meta[idx]
+        if _transcript_index.ntotal == 0:
+            return []
         
-        # Filter by transcript_id if specified
-        if transcript_id and meta["transcript_id"] != transcript_id:
-            continue
+        # Embed query (with query prefix for E5)
+        q_emb = _embed_text([query], is_query=True)
         
-        score = float(scores[0][i])
+        # If filtering by transcript_id, search more aggressively
+        # because we need to find results in that specific transcript
+        if transcript_id:
+            # Search through more results to find matches for this transcript
+            k = min(500, _transcript_index.ntotal)  # Search more when filtering
+        else:
+            k = min(top_k * 5, _transcript_index.ntotal)
         
-        # Use a very low threshold - we want to find ANY relevant content
-        # The LLM will determine what's actually useful
-        if score < settings.SIMILARITY_THRESHOLD:
-            continue
+        scores, indices = _transcript_index.search(q_emb, k)
         
-        # Skip very short chunks (less meaningful)
-        if len(meta["text"].strip()) < 20:
-            continue
-        
-        results.append({
-            "chunk": TranscriptChunk(
-                id=meta["chunk_id"],
-                text=meta["text"],
-                start_time=meta["start_time"],
-                end_time=meta["end_time"]
-            ),
-            "score": score
-        })
-        
-        if len(results) >= top_k:
-            break
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx < 0 or idx >= len(_transcript_meta):
+                continue
+            
+            meta = _transcript_meta[idx]
+            
+            # Filter by transcript_id if specified
+            if transcript_id and meta["transcript_id"] != transcript_id:
+                continue
+            
+            score = float(scores[0][i])
+            
+            # Use a very low threshold - we want to find ANY relevant content
+            # The LLM will determine what's actually useful
+            if score < settings.SIMILARITY_THRESHOLD:
+                continue
+            
+            # Skip very short chunks (less meaningful)
+            if len(meta["text"].strip()) < 20:
+                continue
+            
+            results.append({
+                "chunk": TranscriptChunk(
+                    id=meta["chunk_id"],
+                    text=meta["text"],
+                    start_time=meta["start_time"],
+                    end_time=meta["end_time"]
+                ),
+                "score": score
+            })
+            
+            if len(results) >= top_k:
+                break
     
     return results
 
@@ -270,46 +309,48 @@ def _load_gita_verses():
 
 
 def search_gita(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-    """Search Bhagavad Gita for relevant verses."""
+    """Search Bhagavad Gita for relevant verses (thread-safe)."""
     global _gita_index, _gita_verses
     
-    load_gita()
-    
-    if _gita_index is None or _gita_index.ntotal == 0:
-        return []
-    
-    # Embed query (with query prefix for E5)
-    q_emb = _embed_text([query], is_query=True)
-    
-    # Search
-    k = min(top_k, _gita_index.ntotal)
-    scores, indices = _gita_index.search(q_emb, k)
-    
-    results = []
-    for i, idx in enumerate(indices[0]):
-        if idx < 0 or idx >= len(_gita_verses):
-            continue
+    with _gita_lock:
+        load_gita()
         
-        score = float(scores[0][i])
-        if score < settings.SIMILARITY_THRESHOLD:
-            continue
+        if _gita_index is None or _gita_index.ntotal == 0:
+            return []
         
-        verse = _gita_verses[idx]
-        results.append({
-            "verse": GitaVerse(
-                chapter=verse["chapter"],
-                verse=verse["verse"],
-                sanskrit=verse.get("sanskrit", ""),
-                hindi=verse.get("hindi_meaning", ""),
-                english=verse.get("english_meaning", "")
-            ),
-            "score": score
-        })
+        # Embed query (with query prefix for E5)
+        q_emb = _embed_text([query], is_query=True)
+        
+        # Search
+        k = min(top_k, _gita_index.ntotal)
+        scores, indices = _gita_index.search(q_emb, k)
+        
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx < 0 or idx >= len(_gita_verses):
+                continue
+            
+            score = float(scores[0][i])
+            if score < settings.SIMILARITY_THRESHOLD:
+                continue
+            
+            verse = _gita_verses[idx]
+            results.append({
+                "verse": GitaVerse(
+                    chapter=verse["chapter"],
+                    verse=verse["verse"],
+                    sanskrit=verse.get("sanskrit", ""),
+                    hindi=verse.get("hindi_meaning", ""),
+                    english=verse.get("english_meaning", "")
+                ),
+                "score": score
+            })
     
     return results
 
 
 def has_transcripts() -> bool:
     """Check if any transcripts are indexed."""
-    _load_transcript_index()
-    return _transcript_index.ntotal > 0
+    with _transcript_lock:
+        _load_transcript_index()
+        return _transcript_index.ntotal > 0

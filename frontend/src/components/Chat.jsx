@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { sendMessage } from '../api';
+﻿import { useState, useEffect, useRef, useCallback } from 'react';
+import { sendMessage, getChatHistory, clearChatHistoryApi } from '../api';
 import { Icons } from './Icons';
 import TextToSpeech from './TextToSpeech';
+import { useAuth } from './AuthContext';
 
 // Detect browser Speech Recognition support
 function getSpeechRecognition() {
@@ -14,15 +15,26 @@ function getSpeechRecognition() {
 }
 
 function Chat({ sessionId, onNewMessage }) {
-    const [messages, setMessages] = useState([]);
+    const { isAuthenticated } = useAuth();
+    const chatKey = `chat_${sessionId}`;
+    const [messages, setMessages] = useState(() => {
+        // Authenticated users load from DB in useEffect; start empty
+        if (localStorage.getItem('dv_access_token')) return [];
+        try {
+            const saved = localStorage.getItem(chatKey);
+            return saved ? JSON.parse(saved) : [];
+        } catch { return []; }
+    });
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [historyLoading, setHistoryLoading] = useState(false);
     const [outputLanguage, setOutputLanguage] = useState('auto');
     const [isListening, setIsListening] = useState(false);
     const [micError, setMicError] = useState(null);
     const [interimText, setInterimText] = useState('');
     const [micSupported, setMicSupported] = useState(false);
     const [micLevel, setMicLevel] = useState(0); // 0-100 for visual feedback
+    const [confirmingClear, setConfirmingClear] = useState(false);
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
     const recognitionRef = useRef(null);
@@ -38,11 +50,36 @@ function Chat({ sessionId, onNewMessage }) {
         const SR = getSpeechRecognition();
         setMicSupported(!!SR);
         if (!SR) {
-            console.warn('[Speech] SpeechRecognition API not available in this browser');
         } else {
-            console.log('[Speech] SpeechRecognition API available:', SR.name || 'webkitSpeechRecognition');
         }
     }, []);
+
+    // Load chat history from DB when authenticated
+    useEffect(() => {
+        if (isAuthenticated && sessionId) {
+            setHistoryLoading(true);
+            getChatHistory(sessionId).then(data => {
+                if (data?.messages?.length > 0) {
+                    const mapped = data.messages.map(msg => ({
+                        id: msg.id,
+                        role: msg.role,
+                        content: msg.content,
+                        source: msg.source_type,
+                        sourceRef: msg.source_reference,
+                        audioUrl: msg.audio_url,
+                    }));
+                    setMessages(mapped);
+                }
+            }).catch(err => {
+                console.warn('Failed to load chat history:', err.message);
+                // Fall back to localStorage if DB fails
+                try {
+                    const saved = localStorage.getItem(chatKey);
+                    if (saved) setMessages(JSON.parse(saved));
+                } catch {}
+            }).finally(() => setHistoryLoading(false));
+        }
+    }, [isAuthenticated, sessionId]);
 
     // Keep input ref in sync
     useEffect(() => { inputRef2.current = input; }, [input]);
@@ -51,6 +88,18 @@ function Chat({ sessionId, onNewMessage }) {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    // Persist messages to localStorage (anonymous users only — authenticated use DB)
+    useEffect(() => {
+        if (isAuthenticated) return; // DB handles persistence for logged-in users
+        try {
+            if (messages.length > 0) {
+                localStorage.setItem(chatKey, JSON.stringify(messages));
+            } else {
+                localStorage.removeItem(chatKey);
+            }
+        } catch { /* quota exceeded — ignore */ }
+    }, [messages, chatKey, isAuthenticated]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -78,7 +127,6 @@ function Chat({ sessionId, onNewMessage }) {
             // List available audio devices for debugging
             const devices = await navigator.mediaDevices.enumerateDevices();
             const mics = devices.filter(d => d.kind === 'audioinput');
-            console.log('[Mic] Available microphones:', mics.map(m => `${m.label || 'unnamed'} (${m.deviceId.slice(0,8)})`));
 
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
@@ -91,15 +139,12 @@ function Chat({ sessionId, onNewMessage }) {
 
             // Log which mic track we got
             const audioTrack = stream.getAudioTracks()[0];
-            console.log('[Mic] Using track:', audioTrack.label, '| enabled:', audioTrack.enabled, '| muted:', audioTrack.muted, '| readyState:', audioTrack.readyState);
 
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             // CRITICAL: Resume AudioContext (Chrome suspends it by default)
             if (audioCtx.state === 'suspended') {
                 await audioCtx.resume();
-                console.log('[Mic] AudioContext resumed from suspended state');
             }
-            console.log('[Mic] AudioContext state:', audioCtx.state, '| sampleRate:', audioCtx.sampleRate);
 
             const source = audioCtx.createMediaStreamSource(stream);
             const analyser = audioCtx.createAnalyser();
@@ -127,15 +172,12 @@ function Chat({ sessionId, onNewMessage }) {
                 // Log every ~2 seconds for debugging
                 logCounter++;
                 if (logCounter % 120 === 0) {
-                    console.log('[Mic] Level:', level, '| raw RMS:', rms.toFixed(4), '| AudioCtx:', audioCtx.state);
                 }
 
                 animFrameRef.current = requestAnimationFrame(poll);
             };
             animFrameRef.current = requestAnimationFrame(poll);
-            console.log('[Mic] Audio level monitor started (time-domain mode)');
         } catch (err) {
-            console.error('[Mic] Could not start audio monitor:', err.name, err.message);
             setMicError('Mic access failed: ' + err.message);
             setTimeout(() => setMicError(null), 5000);
         }
@@ -179,29 +221,25 @@ function Chat({ sessionId, onNewMessage }) {
         recognition.interimResults = true;
         recognition.maxAlternatives = 1;
 
-        // Set language — default to Hindi for this app
+        // Set language â€” default to Hindi for this app
         if (outputLanguage === 'en') {
             recognition.lang = 'en-US';
         } else {
-            // Auto or Hindi → use Hindi
+            // Auto or Hindi â†’ use Hindi
             recognition.lang = 'hi-IN';
         }
 
         recognition.onstart = () => {
             setIsListening(true);
-            console.log('[Speech] Started, lang:', recognition.lang);
         };
 
         recognition.onaudiostart = () => {
-            console.log('[Speech] Audio capture started — mic is active');
         };
 
         recognition.onsoundstart = () => {
-            console.log('[Speech] Sound detected');
         };
 
         recognition.onspeechstart = () => {
-            console.log('[Speech] Speech detected');
         };
 
         recognition.onresult = (event) => {
@@ -224,32 +262,28 @@ function Chat({ sessionId, onNewMessage }) {
                 setInput(combined);
                 baseInputRef.current = combined;
                 setInterimText(interimTranscript);
-                console.log('[Speech] Final:', finalTranscript.trim());
             }
 
             if (interimTranscript) {
                 setInterimText(interimTranscript);
-                console.log('[Speech] Interim:', interimTranscript);
             }
         };
 
         recognition.onerror = (event) => {
-            console.error('[Speech] Error:', event.error, event.message);
             if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                setMicError('Microphone blocked! Click the lock icon in address bar → Allow microphone.');
+                setMicError('Microphone blocked! Click the lock icon in address bar â†’ Allow microphone.');
                 wantListeningRef.current = false;
                 setIsListening(false);
                 stopMicMonitor();
             } else if (event.error === 'no-speech') {
-                // Chrome fires this after ~5s of silence — auto-restart via onend
-                console.log('[Speech] No speech detected, will auto-restart...');
+                // Chrome fires this after ~5s of silence â€” auto-restart via onend
             } else if (event.error === 'audio-capture') {
                 setMicError('No microphone found. Connect a mic and try again.');
                 wantListeningRef.current = false;
                 setIsListening(false);
                 stopMicMonitor();
             } else if (event.error === 'network') {
-                setMicError('Network error — speech recognition needs internet.');
+                setMicError('Network error â€” speech recognition needs internet.');
                 wantListeningRef.current = false;
                 setIsListening(false);
                 stopMicMonitor();
@@ -264,10 +298,8 @@ function Chat({ sessionId, onNewMessage }) {
         };
 
         recognition.onend = () => {
-            console.log('[Speech] Recognition ended, wantListening:', wantListeningRef.current);
             recognitionRef.current = null;
             if (wantListeningRef.current) {
-                console.log('[Speech] Auto-restarting...');
                 setTimeout(() => {
                     if (wantListeningRef.current) startListening();
                 }, 300);
@@ -286,9 +318,7 @@ function Chat({ sessionId, onNewMessage }) {
 
         try {
             recognition.start();
-            console.log('[Speech] recognition.start() called');
         } catch (err) {
-            console.error('[Speech] Failed to start:', err);
             setMicError('Failed to start: ' + err.message);
             setTimeout(() => setMicError(null), 5000);
             setIsListening(false);
@@ -303,7 +333,6 @@ function Chat({ sessionId, onNewMessage }) {
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.stop();
-                console.log('[Speech] Manually stopped');
             } catch {}
         }
         setIsListening(false);
@@ -328,7 +357,7 @@ function Chat({ sessionId, onNewMessage }) {
         }
 
         const userMessage = {
-            id: Date.now().toString(),
+            id: crypto.randomUUID(),
             role: 'user',
             content: input.trim(),
         };
@@ -347,7 +376,7 @@ function Chat({ sessionId, onNewMessage }) {
             const response = await sendMessage(userMessage.content, sessionId, lang);
 
             const assistantMessage = {
-                id: (Date.now() + 1).toString(),
+                id: crypto.randomUUID(),
                 role: 'assistant',
                 content: response.answer,
                 source: response.source_type,
@@ -359,7 +388,7 @@ function Chat({ sessionId, onNewMessage }) {
             onNewMessage?.();
         } catch (err) {
             const errorMessage = {
-                id: (Date.now() + 1).toString(),
+                id: crypto.randomUUID(),
                 role: 'assistant',
                 content: `Sorry, I couldn't process your question. ${err.message}`,
                 isError: true,
@@ -377,9 +406,18 @@ function Chat({ sessionId, onNewMessage }) {
         }
     };
 
-    const handleClear = async () => {
-        if (confirm('Clear all chat history?')) {
+    const handleClear = () => {
+        if (confirmingClear) {
             setMessages([]);
+            setConfirmingClear(false);
+            // Also clear from DB for authenticated users
+            if (isAuthenticated && sessionId) {
+                clearChatHistoryApi(sessionId).catch(() => {});
+            }
+        } else {
+            setConfirmingClear(true);
+            // Auto-cancel after 3 seconds
+            setTimeout(() => setConfirmingClear(false), 3000);
         }
     };
 
@@ -410,21 +448,26 @@ function Chat({ sessionId, onNewMessage }) {
                     >
                         <option value="auto">Auto Detect</option>
                         <option value="en">English</option>
-                        <option value="hi">हिंदी (Hindi)</option>
+                        <option value="hi">à¤¹à¤¿à¤‚à¤¦à¥€ (Hindi)</option>
                     </select>
                 </div>
 
                 {messages.length > 0 && (
-                    <button className="btn btn-ghost btn-sm" onClick={handleClear}>
+                    <button className={`btn btn-ghost btn-sm ${confirmingClear ? 'btn-danger' : ''}`} onClick={handleClear}>
                         <Icons.Delete size={13} />
-                        Clear
+                        {confirmingClear ? 'Confirm Clear?' : 'Clear'}
                     </button>
                 )}
             </div>
 
             {/* Messages */}
-            <div className="chat-messages">
-                {messages.length === 0 ? (
+            <div className="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+                {historyLoading ? (
+                    <div className="chat-empty-state">
+                        <Icons.Loading size={24} className="animate-spin" />
+                        <p className="chat-empty-text">Loading chat history…</p>
+                    </div>
+                ) : messages.length === 0 ? (
                     <div className="chat-empty-state">
                         <Icons.Chat size={28} className="chat-empty-icon" />
                         <p className="chat-empty-text">Ask anything about this discourse</p>
@@ -432,8 +475,8 @@ function Chat({ sessionId, onNewMessage }) {
                             {micSupported ? 'Type or use the microphone' : 'Type your question below'}
                         </p>
                         <div className="chat-suggestions">
-                            <button className="chat-suggestion-chip" onClick={() => setInput('इसका सारांश बताइए')}>
-                                इसका सारांश बताइए
+                            <button className="chat-suggestion-chip" onClick={() => setInput('à¤‡à¤¸à¤•à¤¾ à¤¸à¤¾à¤°à¤¾à¤‚à¤¶ à¤¬à¤¤à¤¾à¤‡à¤')}>
+                                à¤‡à¤¸à¤•à¤¾ à¤¸à¤¾à¤°à¤¾à¤‚à¤¶ à¤¬à¤¤à¤¾à¤‡à¤
                             </button>
                             <button className="chat-suggestion-chip" onClick={() => setInput('What is the main teaching?')}>
                                 Main teaching?
@@ -452,18 +495,6 @@ function Chat({ sessionId, onNewMessage }) {
                             <p style={{ fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : undefined }}>
                                 {msg.content}
                             </p>
-
-                            {msg.quotes && msg.quotes.length > 0 && (
-                                <div className="chat-quote-box">
-                                    <div className="chat-quote-label">
-                                        <Icons.BookOpen size={13} />
-                                        From the speech:
-                                    </div>
-                                    {msg.quotes.map((quote, i) => (
-                                        <p key={i} className="chat-quote-text">"{quote}"</p>
-                                    ))}
-                                </div>
-                            )}
 
                             {msg.role === 'assistant' && !msg.isError && (
                                 <div className="chat-msg-tts">
@@ -513,8 +544,8 @@ function Chat({ sessionId, onNewMessage }) {
                     )}
                     <div className="chat-listening-status">
                         {micLevel > 5
-                            ? <span><span className="dot-active">●</span> Mic active — speak clearly</span>
-                            : <span><span className="dot-inactive">●</span> No audio — check mic permissions</span>}
+                            ? <span><span className="dot-active">â—</span> Mic active â€” speak clearly</span>
+                            : <span><span className="dot-inactive">â—</span> No audio â€” check mic permissions</span>}
                     </div>
                 </div>
             )}
@@ -549,7 +580,8 @@ function Chat({ sessionId, onNewMessage }) {
                     ref={inputRef}
                     className="chat-input"
                     type="text"
-                    placeholder={isListening ? 'Listening... speak now' : (outputLanguage === 'hi' ? 'हिंदी में पूछें...' : 'Ask in Hindi or English...')}
+                    aria-label="Ask a question about this discourse"
+                    placeholder={isListening ? 'Listening... speak now' : (outputLanguage === 'hi' ? 'à¤¹à¤¿à¤‚à¤¦à¥€ à¤®à¥‡à¤‚ à¤ªà¥‚à¤›à¥‡à¤‚...' : 'Ask in Hindi or English...')}
                     value={isListening && interimText ? input + (input ? ' ' : '') + interimText : input}
                     onChange={(e) => { if (!isListening) setInput(e.target.value); }}
                     onKeyDown={handleKeyDown}

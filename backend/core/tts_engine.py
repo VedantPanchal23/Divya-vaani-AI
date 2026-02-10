@@ -30,8 +30,8 @@ EDGE_TTS_VOICES = {
     "en_female": "en-IN-NeerjaNeural",
 }
 
-# SPEED: Aggressive text limit
-MAX_TEXT_LENGTH = 150  # Very short for speed
+# Text limit — 500 chars balances quality and speed (gTTS handles this fine)
+MAX_TEXT_LENGTH = 500
 
 # LRU Cache with max size
 class _LRUCache(OrderedDict):
@@ -79,7 +79,7 @@ async def generate_speech_async(
         return ""
     
     # Check cache
-    cache_key = hashlib.md5(f"{clean_text}:{language}".encode()).hexdigest()[:12]
+    cache_key = hashlib.md5(f"{clean_text}:{language}".encode()).hexdigest()
     cached = _audio_cache.get(cache_key)
     if cached:
         if (settings.AUDIO_DIR / cached.split('/')[-1]).exists():
@@ -120,7 +120,55 @@ async def generate_speech_async(
 
 
 async def generate_long_speech_async(text: str, language: str = "hi", gender: str = None) -> str:
-    return await generate_speech_async(text, language, gender)
+    """Generate speech for long text by splitting into chunks and concatenating."""
+    if not text or not text.strip():
+        return ""
+    # If text is short enough, use the regular function
+    if len(text) <= MAX_TEXT_LENGTH:
+        return await generate_speech_async(text, language, gender)
+    
+    # Split long text by sentences
+    import io
+    from pydub import AudioSegment
+    
+    separators = ['।', '.', '!', '?']
+    chunks = []
+    current = ""
+    for char in text:
+        current += char
+        if char in separators and len(current.strip()) > 20:
+            chunks.append(current.strip())
+            current = ""
+    if current.strip():
+        chunks.append(current.strip())
+    
+    if not chunks:
+        return ""
+    
+    # Generate audio for each chunk
+    combined = AudioSegment.empty()
+    for chunk in chunks:
+        url = await generate_speech_async(chunk[:MAX_TEXT_LENGTH], language, gender)
+        if url:
+            filepath = settings.AUDIO_DIR / url.split('/')[-1]
+            if filepath.exists():
+                try:
+                    seg = AudioSegment.from_mp3(str(filepath))
+                    combined += seg
+                except Exception:
+                    pass
+    
+    if len(combined) == 0:
+        # Fallback: just generate the truncated version
+        return await generate_speech_async(text, language, gender)
+    
+    # Export combined
+    audio_id = str(uuid.uuid4())[:8]
+    filename = f"tts_long_{audio_id}.mp3"
+    filepath = settings.AUDIO_DIR / filename
+    combined.export(str(filepath), format="mp3")
+    url = f"/api/audio/{filename}"
+    return url
 
 
 # =============================================================================

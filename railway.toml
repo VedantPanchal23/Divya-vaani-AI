@@ -7,3 +7,7 @@ healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
+# IMPORTANT: Attach a Railway volume mounted at /app/data
+# This persists uploads, transcripts, audio, and FAISS indexes across deploys.
+# Without it, all user data is lost on every redeploy.
+# Railway Dashboard -> Service -> Settings -> Volumes -> Mount Path: /app/data

@@ -7,6 +7,7 @@ Q&A is generated on-demand using RAG.
 import os
 import uuid
 import time
+import secrets
 import logging
 from pathlib import Path
 from typing import Dict, Optional
@@ -28,10 +29,8 @@ from core import transcriber, llm_engine, rag_engine, tts_engine
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Rate limiter (initialized in run.py, accessed via app.state)
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-limiter = Limiter(key_func=get_remote_address)
+# Rate limiter - shared instance (avoids circular import)
+from rate_limiter import limiter
 
 # In-memory status store for processing jobs (bounded)
 _status: Dict[str, dict] = {}
@@ -52,7 +51,7 @@ def _safe_path(base_dir: Path, filename: str) -> Path:
     """Resolve a path and ensure it stays within base_dir (prevents path traversal)."""
     resolved = (base_dir / filename).resolve()
     base_resolved = base_dir.resolve()
-    if not str(resolved).startswith(str(base_resolved)):
+    if not resolved.is_relative_to(base_resolved):
         raise HTTPException(400, "Invalid filename")
     return resolved
 
@@ -61,7 +60,7 @@ def _verify_admin_key(x_admin_key: Optional[str] = Header(None)):
     """Dependency to verify admin API key for protected endpoints."""
     if not settings.ADMIN_API_KEY:
         raise HTTPException(403, "Admin access disabled: ADMIN_API_KEY not configured on server.")
-    if x_admin_key != settings.ADMIN_API_KEY:
+    if not x_admin_key or not secrets.compare_digest(x_admin_key, settings.ADMIN_API_KEY):
         raise HTTPException(403, "Invalid or missing admin API key. Set X-Admin-Key header.")
 
 
@@ -433,9 +432,15 @@ async def delete_video(video_id: str):
     delete_video_content(video_id)
 
     # Delete associated files
+    for ext in [".mp4", ".mp3", ".wav", ".m4a", ".webm", ".ogg", ".flac"]:
+        path = settings.UPLOAD_DIR / f"{video_id}{ext}"
+        if path.exists():
+            try:
+                path.unlink()
+            except Exception:
+                pass
+
     for path in [
-        settings.UPLOAD_DIR / f"{video_id}.mp4",
-        settings.UPLOAD_DIR / f"{video_id}.mp3",
         settings.TRANSCRIPT_DIR / f"{video_id}.json",
     ]:
         if path.exists():
@@ -571,7 +576,7 @@ async def chat(request: Request, chat_request: ChatRequest):
     greetings_hi = ["नमस्ते", "नमस्कार", "हेलो", "हाय", "राधे राधे", "जय श्री कृष्ण", "हरि ॐ"]
     
     question_lower = question.lower().strip()
-    is_greeting = question_lower in greetings_en or question in greetings_hi or len(question) < 5
+    is_greeting = question_lower in greetings_en or question in greetings_hi
     
     if is_greeting:
         if language == "hi":

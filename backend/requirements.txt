@@ -26,6 +26,21 @@ aiofiles>=24.1.0,<25.0.0
 slowapi>=0.1.9,<1.0.0           # Rate limiting
 
 # ------------------------
+# Database (SQLAlchemy async)
+# ------------------------
+sqlalchemy[asyncio]>=2.0.30,<3.0.0
+aiosqlite>=0.20.0,<1.0.0       # SQLite async driver (dev/fallback)
+asyncpg>=0.30.0,<1.0.0         # PostgreSQL async driver (production)
+greenlet>=3.0.0,<4.0.0         # Required by SQLAlchemy async
+
+# ------------------------
+# Authentication
+# ------------------------
+python-jose[cryptography]>=3.3.0,<4.0.0   # JWT tokens
+passlib[bcrypt]>=1.7.4,<2.0.0             # Password hashing
+bcrypt>=4.0.0,<5.0.0                      # Pin bcrypt 4.x (passlib compat)
+
+# ------------------------
 # Groq API (LLM + Whisper) - Fast cloud inference
 # ------------------------
 groq>=0.11.0,<1.0.0

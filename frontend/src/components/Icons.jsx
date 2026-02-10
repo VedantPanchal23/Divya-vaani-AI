@@ -8,7 +8,7 @@ import {
     FiChevronDown, FiChevronUp, FiChevronLeft, FiSend, FiX, FiSettings, FiInfo,
     FiSearch, FiArrowLeft, FiFileText, FiMessageCircle, FiBook, FiBookOpen,
     FiList, FiMic, FiVideo, FiMusic, FiGlobe,
-    FiMoreVertical, FiHelpCircle
+    FiMoreVertical, FiHelpCircle, FiUser, FiLogIn, FiLogOut, FiHeart, FiUserPlus
 } from 'react-icons/fi';
 
 import {
@@ -31,64 +31,71 @@ export const Icons = {
     Spiritual: OmIcon,
 
     // Theme
-    Sun: (props) => <FiSun {...props} />,
-    Moon: (props) => <FiMoon {...props} />,
+    Sun: FiSun,
+    Moon: FiMoon,
 
     // Actions
-    Upload: (props) => <FiUpload {...props} />,
-    Send: (props) => <FiSend {...props} />,
-    Delete: (props) => <FiTrash2 {...props} />,
-    Refresh: (props) => <FiRefreshCw {...props} />,
-    Close: (props) => <FiX {...props} />,
-    Settings: (props) => <FiSettings {...props} />,
-    Info: (props) => <FiInfo {...props} />,
-    MoreVertical: (props) => <FiMoreVertical {...props} />,
-    Search: (props) => <FiSearch {...props} />,
-    Back: (props) => <FiArrowLeft {...props} />,
+    Upload: FiUpload,
+    Send: FiSend,
+    Delete: FiTrash2,
+    Refresh: FiRefreshCw,
+    Close: FiX,
+    Settings: FiSettings,
+    Info: FiInfo,
+    MoreVertical: FiMoreVertical,
+    Search: FiSearch,
+    Back: FiArrowLeft,
 
     // Media
-    Play: (props) => <FiPlay {...props} />,
-    Pause: (props) => <FiPause {...props} />,
-    Stop: (props) => <FiSquare {...props} />,
-    VolumeOn: (props) => <FiVolume2 {...props} />,
-    VolumeOff: (props) => <FiVolumeX {...props} />,
-    Mic: (props) => <FiMic {...props} />,
-    Video: (props) => <FiVideo {...props} />,
-    Music: (props) => <FiMusic {...props} />,
+    Play: FiPlay,
+    Pause: FiPause,
+    Stop: FiSquare,
+    VolumeOn: FiVolume2,
+    VolumeOff: FiVolumeX,
+    Mic: FiMic,
+    Video: FiVideo,
+    Music: FiMusic,
 
     // Status
-    Loading: (props) => <FiLoader {...props} />,
-    Error: (props) => <FiAlertCircle {...props} />,
-    Success: (props) => <FiCheckCircle {...props} />,
-    Clock: (props) => <FiClock {...props} />,
+    Loading: FiLoader,
+    Error: FiAlertCircle,
+    Success: FiCheckCircle,
+    Clock: FiClock,
 
     // Content
-    Transcript: (props) => <FiFileText {...props} />,
-    Summary: (props) => <HiOutlineDocumentText {...props} />,
-    Explanation: (props) => <HiOutlineLightBulb {...props} />,
-    Chat: (props) => <FiMessageCircle {...props} />,
-    Question: (props) => <FiHelpCircle {...props} />,
-    Book: (props) => <FiBook {...props} />,
-    BookOpen: (props) => <FiBookOpen {...props} />,
-    List: (props) => <FiList {...props} />,
-    Sessions: (props) => <FiBook {...props} />,
+    Transcript: FiFileText,
+    Summary: HiOutlineDocumentText,
+    Explanation: HiOutlineLightBulb,
+    Chat: FiMessageCircle,
+    Question: FiHelpCircle,
+    Book: FiBook,
+    BookOpen: FiBookOpen,
+    List: FiList,
+    Sessions: FiBook,
 
     // Features
-    Sparkles: (props) => <HiOutlineSparkles {...props} />,
-    Translate: (props) => <HiOutlineTranslate {...props} />,
-    Speak: (props) => <FiVolume2 {...props} />,
-    AI: (props) => <HiOutlineSparkles {...props} />,
-    Globe: (props) => <FiGlobe {...props} />,
+    Sparkles: HiOutlineSparkles,
+    Translate: HiOutlineTranslate,
+    Speak: FiVolume2,
+    AI: HiOutlineSparkles,
+    Globe: FiGlobe,
 
     // Chevrons
-    ChevronDown: (props) => <FiChevronDown {...props} />,
-    ChevronUp: (props) => <FiChevronUp {...props} />,
-    ChevronLeft: (props) => <FiChevronLeft {...props} />,
+    ChevronDown: FiChevronDown,
+    ChevronUp: FiChevronUp,
+    ChevronLeft: FiChevronLeft,
 
     // Processing
-    Processing: (props) => <FiLoader {...props} />,
-    Done: (props) => <FiCheckCircle {...props} />,
-    Pending: (props) => <FiClock {...props} />,
+    Processing: FiLoader,
+    Done: FiCheckCircle,
+    Pending: FiClock,
+
+    // Auth & User
+    User: FiUser,
+    Login: FiLogIn,
+    Logout: FiLogOut,
+    Heart: FiHeart,
+    UserPlus: FiUserPlus,
 };
 
 export default Icons;

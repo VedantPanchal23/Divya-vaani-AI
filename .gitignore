@@ -40,6 +40,10 @@ backend/data/audio/*
 !backend/data/audio/.gitkeep
 backend/data/chroma_db/
 
+# FAISS indexes (generated on startup from source data)
+backend/data/index/*.faiss
+backend/data/index/*.json
+
 # Media files (uploaded content, not source code)
 *.mp3
 *.wav
