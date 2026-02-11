@@ -221,11 +221,11 @@ function Chat({ sessionId, onNewMessage }) {
         recognition.interimResults = true;
         recognition.maxAlternatives = 1;
 
-        // Set language â€” default to Hindi for this app
+        // Set language — default to Hindi for this app
         if (outputLanguage === 'en') {
             recognition.lang = 'en-US';
         } else {
-            // Auto or Hindi â†’ use Hindi
+            // Auto or Hindi → use Hindi
             recognition.lang = 'hi-IN';
         }
 
@@ -271,19 +271,19 @@ function Chat({ sessionId, onNewMessage }) {
 
         recognition.onerror = (event) => {
             if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                setMicError('Microphone blocked! Click the lock icon in address bar â†’ Allow microphone.');
+                setMicError('Microphone blocked! Click the lock icon in address bar → Allow microphone.');
                 wantListeningRef.current = false;
                 setIsListening(false);
                 stopMicMonitor();
             } else if (event.error === 'no-speech') {
-                // Chrome fires this after ~5s of silence â€” auto-restart via onend
+                // Chrome fires this after ~5s of silence — auto-restart via onend
             } else if (event.error === 'audio-capture') {
                 setMicError('No microphone found. Connect a mic and try again.');
                 wantListeningRef.current = false;
                 setIsListening(false);
                 stopMicMonitor();
             } else if (event.error === 'network') {
-                setMicError('Network error â€” speech recognition needs internet.');
+                setMicError('Network error — speech recognition needs internet.');
                 wantListeningRef.current = false;
                 setIsListening(false);
                 stopMicMonitor();
@@ -448,7 +448,7 @@ function Chat({ sessionId, onNewMessage }) {
                     >
                         <option value="auto">Auto Detect</option>
                         <option value="en">English</option>
-                        <option value="hi">à¤¹à¤¿à¤‚à¤¦à¥€ (Hindi)</option>
+                        <option value="hi">हिंदी (Hindi)</option>
                     </select>
                 </div>
 
@@ -475,8 +475,8 @@ function Chat({ sessionId, onNewMessage }) {
                             {micSupported ? 'Type or use the microphone' : 'Type your question below'}
                         </p>
                         <div className="chat-suggestions">
-                            <button className="chat-suggestion-chip" onClick={() => setInput('à¤‡à¤¸à¤•à¤¾ à¤¸à¤¾à¤°à¤¾à¤‚à¤¶ à¤¬à¤¤à¤¾à¤‡à¤')}>
-                                à¤‡à¤¸à¤•à¤¾ à¤¸à¤¾à¤°à¤¾à¤‚à¤¶ à¤¬à¤¤à¤¾à¤‡à¤
+                            <button className="chat-suggestion-chip" onClick={() => setInput('इसका सारांश बताइए')}>
+                                इसका सारांश बताइए
                             </button>
                             <button className="chat-suggestion-chip" onClick={() => setInput('What is the main teaching?')}>
                                 Main teaching?
@@ -527,29 +527,6 @@ function Chat({ sessionId, onNewMessage }) {
             )}
 
             {/* Listening indicator */}
-            {isListening && (
-                <div className="chat-listening-indicator">
-                    <div className="chat-listening-row">
-                        <span className="chat-listening-icon"><Icons.Mic size={15} /></span>
-                        <span>Listening...</span>
-                        <div className="chat-listening-bar-bg">
-                            <div
-                                className="chat-listening-bar-fill"
-                                style={{ width: `${micLevel}%`, background: getMicBarColor() }}
-                            />
-                        </div>
-                    </div>
-                    {interimText && (
-                        <div className="chat-listening-interim">"{interimText}"</div>
-                    )}
-                    <div className="chat-listening-status">
-                        {micLevel > 5
-                            ? <span><span className="dot-active">â—</span> Mic active â€” speak clearly</span>
-                            : <span><span className="dot-inactive">â—</span> No audio â€” check mic permissions</span>}
-                    </div>
-                </div>
-            )}
-
             {/* Input */}
             <div className="chat-input-container">
                 {micSupported ? (
@@ -581,7 +558,7 @@ function Chat({ sessionId, onNewMessage }) {
                     className="chat-input"
                     type="text"
                     aria-label="Ask a question about this discourse"
-                    placeholder={isListening ? 'Listening... speak now' : (outputLanguage === 'hi' ? 'à¤¹à¤¿à¤‚à¤¦à¥€ à¤®à¥‡à¤‚ à¤ªà¥‚à¤›à¥‡à¤‚...' : 'Ask in Hindi or English...')}
+                    placeholder={isListening ? 'Listening... speak now' : (outputLanguage === 'hi' ? 'हिंदी में पूछें...' : 'Ask in Hindi or English...')}
                     value={isListening && interimText ? input + (input ? ' ' : '') + interimText : input}
                     onChange={(e) => { if (!isListening) setInput(e.target.value); }}
                     onKeyDown={handleKeyDown}
