@@ -167,7 +167,7 @@ export async function textToSpeech(text, language = 'hi') {
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ text, language }),
+        body: JSON.stringify({ text, language, gender: 'male' }),
     });
 
     if (!response.ok) {

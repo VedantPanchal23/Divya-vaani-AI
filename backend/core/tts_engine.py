@@ -1,8 +1,8 @@
 """
-Divya Vaani AI - TTS Engine v4.3 (ULTRA FAST)
+Divya Vaani AI - TTS Engine v4.4 (Edge TTS Male Voice)
 
-Uses gTTS (Google TTS) as primary - much faster than Edge TTS.
-Target: Under 2-3 seconds for any text.
+Uses Microsoft Edge TTS as primary - high quality male neural voices.
+Falls back to gTTS if Edge TTS fails.
 LRU cache to prevent unbounded memory growth.
 """
 import logging
@@ -65,8 +65,8 @@ async def generate_speech_async(
     gender: str = None
 ) -> str:
     """
-    Generate speech - ULTRA FAST mode.
-    Uses gTTS (Google) as primary - much faster than Edge TTS.
+    Generate speech using Edge TTS male neural voices.
+    Falls back to gTTS if Edge TTS fails.
     """
     if not text or not text.strip():
         return ""
@@ -78,8 +78,8 @@ async def generate_speech_async(
     if not clean_text:
         return ""
     
-    # Check cache
-    cache_key = hashlib.md5(f"{clean_text}:{language}".encode()).hexdigest()
+    # Check cache (include gender in key for male-specific caching)
+    cache_key = hashlib.md5(f"{clean_text}:{language}:male".encode()).hexdigest()
     cached = _audio_cache.get(cache_key)
     if cached:
         if (settings.AUDIO_DIR / cached.split('/')[-1]).exists():
@@ -93,19 +93,19 @@ async def generate_speech_async(
         filename = f"tts_{audio_id}.mp3"
         filepath = settings.AUDIO_DIR / filename
         
-        # PRIMARY: Use gTTS (Google) - FASTER
-        success = await _generate_gtts_fast(clean_text, language, filepath)
+        # PRIMARY: Use Edge TTS - high quality male neural voice
+        success = await _generate_edge_tts_fast(clean_text, language, "male", filepath)
         
         if success:
             url = f"/api/audio/{filename}"
             _audio_cache.set(cache_key, url)
             elapsed = time.time() - start_time
-            logger.info(f"TTS done: {elapsed:.2f}s ({len(clean_text)} chars)")
+            logger.info(f"TTS done (Edge): {elapsed:.2f}s ({len(clean_text)} chars)")
             return url
         
-        # FALLBACK: Edge TTS
-        logger.warning("gTTS failed, trying Edge TTS...")
-        success = await _generate_edge_tts_fast(clean_text, language, gender or "male", filepath)
+        # FALLBACK: gTTS (Google)
+        logger.warning("Edge TTS failed, trying gTTS...")
+        success = await _generate_gtts_fast(clean_text, language, filepath)
         
         if success:
             url = f"/api/audio/{filename}"

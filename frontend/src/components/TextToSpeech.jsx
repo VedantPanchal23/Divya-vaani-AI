@@ -1,235 +1,124 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { Icons } from './Icons';
+import { textToSpeech, getAudioUrl } from '../api';
 
 /**
- * TextToSpeech Component - Uses Browser's Built-in Speech Synthesis
+ * TextToSpeech Component - Uses Microsoft Edge TTS (server-side) male voice
  * 
  * Features:
- * - Supports server-side audio URL (audioUrl prop) as priority
- * - Instant browser playback as fallback (no server calls)
- * - Reads full text with chunk-based workaround for Chrome 15s bug
- * - Supports Hindi and English
+ * - Calls backend /api/tts which uses Edge TTS male neural voices
+ *   (hi-IN-MadhurNeural for Hindi, en-IN-PrabhatNeural for English)
+ * - Supports pre-generated audio URL (audioUrl prop) as priority
+ * - Falls back to browser SpeechSynthesis only if server fails
  * - Cleans markdown and timestamps
  */
 function TextToSpeech({ text, lang = 'hi', audioUrl }) {
     const [isPlaying, setIsPlaying] = useState(false);
-    const [voices, setVoices] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
     const audioRef = useRef(null);
-    const utteranceRef = useRef(null);
-    const resumeTimerRef = useRef(null);
 
-    // Load available voices
-    useEffect(() => {
-        const loadVoices = () => {
-            const availableVoices = window.speechSynthesis?.getVoices() || [];
-            setVoices(availableVoices);
-        };
-
-        loadVoices();
-        
-        // Chrome loads voices asynchronously
-        if (window.speechSynthesis) {
-            window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
-        }
-
-        return () => {
-            if (window.speechSynthesis) {
-                window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
-            }
-        };
-    }, []);
-
-    // Cancel speech on unmount
-    useEffect(() => {
-        return () => {
-            if (window.speechSynthesis) {
-                window.speechSynthesis.cancel();
-            }
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current = null;
-            }
-            if (resumeTimerRef.current) {
-                clearInterval(resumeTimerRef.current);
-            }
-        };
-    }, []);
-
-    // Clean text for TTS
-    const cleanText = (rawText) => {
-        if (!rawText) return '';
-        return rawText
-            // Remove timestamps like [03:43 - 04:13]:
-            .replace(/\[\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\]:\s*/g, '')
-            // Remove markdown headers
-            .replace(/^#{1,6}\s*/gm, '')
-            // Remove bold/italic
-            .replace(/\*+([^*]+)\*+/g, '$1')
-            .replace(/_+([^_]+)_+/g, '$1')
-            // Remove bullet points
-            .replace(/^[\s]*[-*•]\s*/gm, ' ')
-            // Remove numbered lists  
-            .replace(/^[\s]*\d+\.\s*/gm, ' ')
-            // Remove URLs
-            .replace(/https?:\/\/\S+/g, '')
-            // Normalize whitespace
-            .replace(/\s+/g, ' ')
-            .trim();
-    };
-
-    // Find best voice for language
-    const getBestVoice = (targetLang) => {
-        const langCode = targetLang.startsWith('hi') ? 'hi' : 'en';
-        
-        // Priority: Google voices > Microsoft voices > Any matching voice
-        const googleVoice = voices.find(v => 
-            v.lang.startsWith(langCode) && v.name.toLowerCase().includes('google')
-        );
-        if (googleVoice) return googleVoice;
-
-        const msVoice = voices.find(v => 
-            v.lang.startsWith(langCode) && v.name.toLowerCase().includes('microsoft')
-        );
-        if (msVoice) return msVoice;
-
-        // Any voice matching the language
-        return voices.find(v => v.lang.startsWith(langCode));
-    };
-
-    const handlePlay = () => {
-        if (!text && !audioUrl) return;
-
-        // If playing, stop
-        if (isPlaying) {
-            handleStop();
-            return;
-        }
-
-        // Priority 1: Server-side audio URL
-        if (audioUrl) {
-            const audio = new Audio(audioUrl);
-            audioRef.current = audio;
-            audio.onplay = () => setIsPlaying(true);
-            audio.onended = () => { setIsPlaying(false); audioRef.current = null; };
-            audio.onerror = () => {
-                // Fallback to browser TTS if audio fails
-                setIsPlaying(false);
-                audioRef.current = null;
-                playBrowserTTS();
-            };
-            audio.play().catch(() => {
-                audioRef.current = null;
-                playBrowserTTS();
-            });
-            return;
-        }
-
-        // Priority 2: Browser SpeechSynthesis
-        playBrowserTTS();
-    };
-
-    const playBrowserTTS = () => {
-        if (!text || !('speechSynthesis' in window)) {
-            console.error('Speech synthesis not supported');
-            return;
-        }
-
-        // Clean and prepare text
-        const cleanedText = cleanText(text);
-        if (!cleanedText) return;
-
-        // Cancel any ongoing speech
-        window.speechSynthesis.cancel();
-        if (resumeTimerRef.current) {
-            clearInterval(resumeTimerRef.current);
-        }
-
-        // Create utterance
-        const utterance = new SpeechSynthesisUtterance(cleanedText);
-        utteranceRef.current = utterance;
-        
-        // Set language
-        const isHindi = lang.startsWith('hi');
-        utterance.lang = isHindi ? 'hi-IN' : 'en-IN';
-        
-        // Set voice
-        const bestVoice = getBestVoice(lang);
-        if (bestVoice) {
-            utterance.voice = bestVoice;
-        }
-
-        // Settings for natural speech
-        utterance.rate = isHindi ? 0.9 : 1.0;
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
-
-        // Event handlers
-        utterance.onstart = () => setIsPlaying(true);
-        utterance.onend = () => {
-            setIsPlaying(false);
-            if (resumeTimerRef.current) {
-                clearInterval(resumeTimerRef.current);
-                resumeTimerRef.current = null;
-            }
-        };
-        utterance.onerror = (e) => {
-            if (e.error !== 'canceled') {
-                console.error('TTS Error:', e);
-            }
-            setIsPlaying(false);
-            if (resumeTimerRef.current) {
-                clearInterval(resumeTimerRef.current);
-                resumeTimerRef.current = null;
-            }
-        };
-
-        // Speak
-        window.speechSynthesis.speak(utterance);
-
-        // Chrome workaround: Chrome pauses SpeechSynthesis after ~15 seconds.
-        // Calling pause() then resume() every 10s keeps it alive.
-        resumeTimerRef.current = setInterval(() => {
-            if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-                window.speechSynthesis.pause();
-                window.speechSynthesis.resume();
-            } else if (!window.speechSynthesis.speaking) {
-                clearInterval(resumeTimerRef.current);
-                resumeTimerRef.current = null;
-            }
-        }, 10000);
-    };
+    // Cancel audio on unmount
+    // (using ref cleanup pattern instead of useEffect for simplicity)
 
     const handleStop = () => {
         if (audioRef.current) {
             audioRef.current.pause();
+            audioRef.current.currentTime = 0;
             audioRef.current = null;
         }
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
         }
-        if (resumeTimerRef.current) {
-            clearInterval(resumeTimerRef.current);
-            resumeTimerRef.current = null;
-        }
         setIsPlaying(false);
+        setIsLoading(false);
     };
 
-    // Check if browser supports speech synthesis or we have an audio URL
-    const isSupported = audioUrl || 'speechSynthesis' in window;
+    const playAudioUrl = (url) => {
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onplay = () => { setIsPlaying(true); setIsLoading(false); };
+        audio.onended = () => { setIsPlaying(false); audioRef.current = null; };
+        audio.onerror = () => {
+            setIsPlaying(false);
+            setIsLoading(false);
+            audioRef.current = null;
+        };
+        audio.play().catch(() => {
+            setIsPlaying(false);
+            setIsLoading(false);
+            audioRef.current = null;
+        });
+    };
 
-    if (!isSupported) {
-        return null; // Don't show button if not supported
-    }
+    const playBrowserTTSFallback = () => {
+        if (!text || !('speechSynthesis' in window)) return;
+
+        const cleanedText = text
+            .replace(/\[\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\]:\s*/g, '')
+            .replace(/^#{1,6}\s*/gm, '')
+            .replace(/\*+([^*]+)\*+/g, '$1')
+            .replace(/_+([^_]+)_+/g, '$1')
+            .replace(/^[\s]*[-*•]\s*/gm, ' ')
+            .replace(/^[\s]*\d+\.\s*/gm, ' ')
+            .replace(/https?:\/\/\S+/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!cleanedText) return;
+
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(cleanedText);
+        utterance.lang = lang.startsWith('hi') ? 'hi-IN' : 'en-IN';
+        utterance.rate = lang.startsWith('hi') ? 0.9 : 1.0;
+        utterance.pitch = 0.85;
+        utterance.onstart = () => { setIsPlaying(true); setIsLoading(false); };
+        utterance.onend = () => setIsPlaying(false);
+        utterance.onerror = () => setIsPlaying(false);
+        window.speechSynthesis.speak(utterance);
+    };
+
+    const handlePlay = async () => {
+        if (!text && !audioUrl) return;
+        if (isPlaying) { handleStop(); return; }
+
+        // Priority 1: Pre-generated audio URL
+        if (audioUrl) {
+            playAudioUrl(audioUrl);
+            return;
+        }
+
+        // Priority 2: Call server Edge TTS API (male voice)
+        if (text) {
+            setIsLoading(true);
+            try {
+                const language = lang.startsWith('hi') ? 'hi' : 'en';
+                const response = await textToSpeech(text, language);
+                if (response?.audio_url) {
+                    playAudioUrl(response.audio_url);
+                    return;
+                }
+            } catch (err) {
+                console.warn('Server TTS failed, falling back to browser:', err.message);
+            }
+
+            // Priority 3: Browser fallback
+            playBrowserTTSFallback();
+        }
+    };
 
     return (
         <div className="tts-container">
             <button
-                className={`tts-button ${isPlaying ? 'speaking' : ''}`}
+                className={`tts-button ${isPlaying ? 'speaking' : ''} ${isLoading ? 'loading' : ''}`}
                 onClick={isPlaying ? handleStop : handlePlay}
-                disabled={!text && !audioUrl}
-                title={isPlaying ? 'Stop' : 'Listen'}
+                disabled={(!text && !audioUrl) || isLoading}
+                title={isLoading ? 'Generating...' : isPlaying ? 'Stop' : 'Listen'}
             >
-                {isPlaying ? (
+                {isLoading ? (
+                    <>
+                        <Icons.Loading size={14} className="animate-spin" />
+                        Loading...
+                    </>
+                ) : isPlaying ? (
                     <>
                         <Icons.Stop size={14} />
                         Stop
