@@ -1,7 +1,8 @@
 """Video content routes — list, detail, summary, delete, media serving, import."""
 import logging
+from pathlib import Path
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -148,6 +149,42 @@ async def import_video(video_data: Dict[str, Any], db: AsyncSession = Depends(ge
     except Exception as e:
         logger.error(f"Import failed: {e}")
         raise HTTPException(500, f"Import failed: {e}")
+
+
+@router.post("/videos/{video_id}/upload-media", dependencies=[Depends(_verify_admin_key)])
+async def upload_media(video_id: str, file: UploadFile = File(...)):
+    """Upload a thumbnail or video file for an existing video. Requires admin key.
+    Accepts image files (.jpg/.png/.webp) as thumbnails and video files (.mp4/.webm) as video."""
+    if not video_id.replace('-', '').replace('_', '').isalnum():
+        raise HTTPException(400, "Invalid video ID")
+
+    ext = Path(file.filename or "").suffix.lower()
+    image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    video_exts = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
+
+    if ext in image_exts:
+        dest_dir = settings.DATA_DIR / "thumbnails"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{video_id}{ext}"
+        file_type = "thumbnail"
+    elif ext in video_exts:
+        dest_dir = settings.DATA_DIR / "uploads"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{video_id}{ext}"
+        file_type = "video"
+    else:
+        raise HTTPException(400, f"Unsupported file type: {ext}")
+
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                f.write(chunk)
+        size_mb = dest.stat().st_size / (1024 * 1024)
+        logger.info(f"✅ Uploaded {file_type} for {video_id}: {dest.name} ({size_mb:.1f} MB)")
+        return {"status": "uploaded", "type": file_type, "id": video_id, "size_mb": round(size_mb, 2)}
+    except Exception as e:
+        logger.error(f"Media upload failed: {e}")
+        raise HTTPException(500, f"Upload failed: {e}")
 
 
 @router.get("/thumbnail/{video_id}")
