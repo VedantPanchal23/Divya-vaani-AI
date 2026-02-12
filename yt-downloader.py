@@ -38,7 +38,10 @@ def download(url: str, output_dir: str = ".", audio_only: bool = False) -> None:
         })
     else:
         ydl_opts["format"] = (
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            "bestvideo[ext=mp4][filesize<100M]+bestaudio[ext=m4a]/"
+            "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/"
+            "best[ext=mp4][filesize<100M]/"
+            "best[height<=720][ext=mp4]/best"
         )
 
     try:
