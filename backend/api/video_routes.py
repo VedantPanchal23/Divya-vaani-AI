@@ -1,5 +1,6 @@
-"""Video content routes — list, detail, summary, delete, media serving."""
+"""Video content routes — list, detail, summary, delete, media serving, import."""
 import logging
+from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,6 +133,21 @@ async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
     _status.pop(video_id, None)
     logger.info(f"✅ Deleted video: {video_id}")
     return {"status": "deleted", "id": video_id}
+
+
+@router.post("/videos/import", dependencies=[Depends(_verify_admin_key)])
+async def import_video(video_data: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+    """Import a fully-processed video record directly into the database.
+    Requires admin key. Skips transcription/summarization — expects all fields."""
+    if not video_data.get("id"):
+        raise HTTPException(400, "Video data must include 'id'")
+    try:
+        video = await crud.upsert_video(db, video_data)
+        logger.info(f"✅ Imported video: {video.id}")
+        return {"status": "imported", "id": video.id}
+    except Exception as e:
+        logger.error(f"Import failed: {e}")
+        raise HTTPException(500, f"Import failed: {e}")
 
 
 @router.get("/thumbnail/{video_id}")
