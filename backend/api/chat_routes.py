@@ -49,6 +49,114 @@ def _expand_question_for_search(question: str) -> str:
     return expanded
 
 
+def _detect_sensitive_topic(question: str) -> str | None:
+    """Detect if user is in distress or asking off-topic questions.
+    Returns:
+        - Compassion instruction string if distress detected
+        - "OFF_TOPIC" if clearly unrelated to spirituality
+        - None if normal question
+    """
+    q_lower = question.lower()
+    q_text = question  # Hindi doesn't need lowering
+
+    # Distress / harm keywords — user needs compassionate spiritual guidance
+    distress_en = [
+        "kill", "murder", "suicide", "want to die", "hurt myself",
+        "end my life", "harm", "attack", "destroy", "revenge",
+        "hate someone", "beat", "abuse",
+    ]
+    distress_hi = [
+        "मारना", "हत्या", "आत्महत्या", "मरना चाहता", "मर जाना",
+        "नुकसान", "बदला", "मार डालना", "मारूंगा", "पीटना",
+    ]
+
+    is_distress = (
+        any(w in q_lower for w in distress_en)
+        or any(w in q_text for w in distress_hi)
+    )
+
+    if is_distress:
+        return (
+            "CRITICAL: The user seems to be in emotional distress or discussing harmful thoughts. "
+            "You MUST respond with deep compassion and spiritual wisdom. Guide them AWAY from harm. "
+            "Remind them that every life is sacred (हर जीव भगवान का अंश है), that God loves them, "
+            "and that Maharaj Ji teaches forgiveness, patience, and inner peace. "
+            "If they mention self-harm, strongly encourage them to speak to a trusted person or seek help. "
+            "NEVER provide any harmful guidance. Be a caring spiritual counselor. "
+            "Show them that violence and revenge only bring more suffering, "
+            "while compassion and devotion bring true peace."
+        )
+
+    # ── Off-topic detection (not spiritual at all) ──
+    offtopic_en = [
+        "weather", "stock market", "bitcoin", "crypto", "programming",
+        "code", "recipe", "football", "cricket score", "movie review",
+        "national anthem", "capital of", "president of", "prime minister",
+        "population", "currency", "gdp", "election", "politics",
+        "salary", "job", "interview", "resume", "dating",
+        "girlfriend", "boyfriend", "tinder", "instagram",
+        "youtube", "tiktok", "game", "fortnite", "pubg",
+        "iphone", "android", "laptop", "wifi", "password",
+        "homework", "exam", "school", "college", "university",
+        "science", "physics", "chemistry", "biology", "math",
+        "hospital", "doctor", "medicine", "disease",
+        "train", "flight", "hotel", "restaurant", "pizza",
+        "favorite food", "favourite food", "favorite colour", "favorite movie",
+        "how old are you", "your name", "who are you", "where are you from",
+        "how to cook", "how to make", "how to build",
+        "sex", "porn", "nude", "hot girl", "hot boy",
+    ]
+    offtopic_hi = [
+        "मौसम", "शेयर बाजार", "बिटकॉइन", "प्रोग्रामिंग", "क्रिकेट स्कोर",
+        "राष्ट्रगान", "राष्ट्रगीत", "राजधानी", "राष्ट्रपति", "प्रधानमंत्री",
+        "जनसंख्या", "मुद्रा", "चुनाव", "राजनीति", "नौकरी",
+        "तनख्वाह", "इंटरव्यू", "परीक्षा", "स्कूल", "कॉलेज",
+        "विज्ञान", "भौतिकी", "रसायन", "गणित", "अस्पताल",
+        "डॉक्टर", "दवाई", "ट्रेन", "होटल", "रेस्टोरेंट",
+        "फिल्म", "गाना", "अभिनेता", "मूवी",
+        "भोजन", "खाना", "पसंदीदा", "रंग", "फेवरिट",
+        "आपका नाम", "तुम कौन हो", "तुम्हारा नाम", "कहाँ से हो",
+        "बनाना सिखाओ", "पकाना", "रेसिपी",
+        "क्रिकेट", "फुटबॉल", "मैच", "स्कोर",
+    ]
+    is_offtopic = (
+        any(w in q_lower for w in offtopic_en)
+        or any(w in q_text for w in offtopic_hi)
+    )
+
+    # Pattern-based detection for common non-spiritual question formats
+    if not is_offtopic:
+        import re
+        # Non-spiritual "what is X" patterns (Hindi)
+        nonspi_patterns_hi = [
+            r".*(?:का|की|के)\s+(?:राजधानी|राष्ट्रगान|राष्ट्रपति|प्रधानमंत्री|जनसंख्या|मुद्रा)",
+            r".*(?:कौन\s+(?:सा|सी)\s+(?:भोजन|खाना|रंग|फिल्म|गाना|खेल|देश|शहर))",
+            r".*(?:पसंदीदा|फेवरिट)\s+(?:भोजन|खाना|रंग|फिल्म|गाना|खेल)",
+            r".*(?:कैसे\s+(?:बनाते|पकाते|बनाएं))",
+        ]
+        # Non-spiritual "what is X" patterns (English)
+        nonspi_patterns_en = [
+            r"(?:what|who)\s+(?:is|are|was|were)\s+(?:the\s+)?(?:capital|anthem|president|flag|population)",
+            r"(?:your|my)\s+(?:favorite|favourite|fav)",
+            r"how\s+(?:to|do\s+(?:i|you|we))\s+(?:cook|make|build|fix|install|download)",
+            r"(?:tell|say)\s+(?:me\s+)?(?:a\s+)?(?:joke|story|poem|riddle)",
+        ]
+        for p in nonspi_patterns_hi:
+            if re.search(p, q_text):
+                is_offtopic = True
+                break
+        if not is_offtopic:
+            for p in nonspi_patterns_en:
+                if re.search(p, q_lower):
+                    is_offtopic = True
+                    break
+
+    if is_offtopic:
+        return "OFF_TOPIC"
+
+    return None
+
+
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit(settings.RATE_LIMIT_CHAT)
 async def chat(
@@ -88,6 +196,27 @@ async def chat(
         )
         await _persist_chat(db, user, content_id, question, response)
         return response
+
+    # ── Sensitive topic detection ──
+    sensitivity = _detect_sensitive_topic(question)
+
+    if sensitivity == "OFF_TOPIC":
+        off_topic_msg = (
+            "🙏 यह प्रश्न मेरे विषय से बाहर है। मैं महाराज जी के प्रवचनों और भगवद्गीता से आध्यात्मिक मार्गदर्शन में सहायता कर सकता हूं। कृपया आध्यात्मिक विषय पर प्रश्न पूछें।"
+            if language == "hi" else
+            "🙏 This question is outside my area of expertise. I can help with spiritual guidance from Maharaj Ji's discourses and the Bhagavad Gita. Please ask a spirituality-related question."
+        )
+        response = ChatResponse(
+            answer=off_topic_msg,
+            source_type=SourceType.NOT_FOUND,
+            source_reference="",
+            audio_url=""
+        )
+        await _persist_chat(db, user, content_id, question, response)
+        return response
+
+    # Compassion instruction for distressed users (passed to LLM later)
+    extra_instruction = sensitivity if sensitivity and sensitivity != "OFF_TOPIC" else ""
 
     is_english = llm_engine.is_english_text(question)
     search_query = question
@@ -134,17 +263,22 @@ async def chat(
     use_transcript = False
     use_gita = False
 
-    if is_explicit_gita_question and gita_results:
-        use_gita = True
-    elif gita_results and best_gita_score >= GOOD_GITA_THRESHOLD:
-        if not transcript_results or best_transcript_score < best_gita_score:
-            use_gita = True
-        else:
-            use_transcript = True
+    # ── Decision Logic: TRANSCRIPTS FIRST, Gita as last resort ──
+    # PRIORITY 1: If user is on a specific video, strongly prefer its transcript
+    if content_id and transcript_results and best_transcript_score >= 0.35:
+        use_transcript = True
+    # PRIORITY 2: Transcripts with good score — always use
     elif transcript_results and best_transcript_score >= GOOD_TRANSCRIPT_THRESHOLD:
         use_transcript = True
-    elif transcript_results:
+    # PRIORITY 3: Transcripts with reasonable score — still prefer over Gita
+    elif transcript_results and best_transcript_score >= 0.35:
         use_transcript = True
+    # PRIORITY 4: Explicit Gita question AND no transcript found
+    elif is_explicit_gita_question and gita_results:
+        use_gita = True
+    # PRIORITY 5: Last resort — Gita only when NO transcript matches at all
+    elif gita_results and best_gita_score >= GOOD_GITA_THRESHOLD:
+        use_gita = True
 
     if use_transcript and transcript_results:
         chunks = [r["chunk"] for r in transcript_results]
@@ -153,7 +287,10 @@ async def chat(
             timestamp = f"[{_format_time(c.start_time)} - {_format_time(c.end_time)}]"
             context_parts.append(f"{timestamp}: {c.text}")
         context = "\n\n".join(context_parts)
-        answer = await llm_engine.generate_answer(question, context, SourceType.PRAVACHAN, language)
+        answer = await llm_engine.generate_answer(
+            question, context, SourceType.PRAVACHAN, language,
+            extra_instruction=extra_instruction
+        )
         response = ChatResponse(
             answer=answer,
             source_type=SourceType.PRAVACHAN,
@@ -164,7 +301,10 @@ async def chat(
         return response
 
     if use_gita and gita_results:
-        answer = await llm_engine.generate_gita_answer(question, gita_results, language)
+        answer = await llm_engine.generate_gita_answer(
+            question, gita_results, language,
+            extra_instruction=extra_instruction
+        )
         verse_refs = [f"Chapter {v['verse'].chapter}, Verse {v['verse'].verse}" for v in gita_results]
         response = ChatResponse(
             answer=answer,

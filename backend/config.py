@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"  # Best for Hindi+English retrieval
     EMBEDDING_DIM: int = 384  # Dimension for this model
     TOP_K: int = 10  # Retrieve more chunks for better context
-    SIMILARITY_THRESHOLD: float = 0.3  # Lower threshold to allow more relevant spiritual guidance
+    SIMILARITY_THRESHOLD: float = 0.4  # Balanced threshold - prevents irrelevant low-score matches
     
     # Transcription Enhancement Settings
     PARALLEL_TRANSCRIPTION: bool = True  # Process chunks in parallel for speed

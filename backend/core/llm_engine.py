@@ -97,7 +97,7 @@ def _sanitize_user_input(text: str) -> str:
     return text.strip()
 
 
-async def generate_answer(question: str, context: str, source_type, language: str = "hi") -> str:
+async def generate_answer(question: str, context: str, source_type, language: str = "hi", extra_instruction: str = "") -> str:
     """Generate answer from context using Groq (fast model for low latency)."""
     try:
         client = get_groq_client()
@@ -106,6 +106,7 @@ async def generate_answer(question: str, context: str, source_type, language: st
         safe_question = _sanitize_user_input(question)
         
         lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
+        extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
         
         prompt = f"""SPIRITUAL DISCOURSE CONTEXT (from Maharaj Ji's {source_type.value}):
 {context}
@@ -115,11 +116,15 @@ USER'S QUESTION/CONCERN: {safe_question}
 {lang_instruction}
 
 INSTRUCTIONS:
+⚠️ CRITICAL RULE: First check — is the user's question about spirituality, religion, devotion, dharma, moral values, life philosophy, or personal struggles? If NO (e.g. it's about food, politics, science, entertainment, general knowledge, personal preferences, or any non-spiritual factual question), you MUST respond ONLY with: "🙏 यह प्रश्न आध्यात्मिक विषय से संबंधित नहीं है। कृपया महाराज जी के प्रवचनों से जुड़ा प्रश्न पूछें।" (Hindi) or "🙏 This question is not related to spiritual topics. Please ask questions related to Maharaj Ji's discourses." (English). Do NOT attempt to answer non-spiritual questions using the discourse context. Do NOT force-fit spiritual teachings onto unrelated topics.
+
+If the question IS spiritual, follow these steps:
 1. Find the most relevant spiritual teaching from the context that addresses the user's concern
 2. Quote or paraphrase the relevant teaching with timestamp
 3. Explain how this teaching applies to their situation
 4. Give them hope and practical guidance based on the discourse
 5. Be compassionate - the user may be going through a difficult time
+{extra_block}
 
 Provide a helpful, caring response using the wisdom from the discourse."""
 
@@ -238,10 +243,13 @@ TRANSCRIPT:
     return response.choices[0].message.content
 
 
-async def generate_gita_answer(question: str, verses: list, language: str = "hi") -> str:
+async def generate_gita_answer(question: str, verses: list, language: str = "hi", extra_instruction: str = "") -> str:
     """Generate answer from Bhagavad Gita verses."""
     try:
         client = get_groq_client()
+        
+        # Sanitize user input to prevent prompt injection
+        safe_question = _sanitize_user_input(question)
         
         # Build context from Gita verses
         context_parts = []
@@ -255,11 +263,12 @@ Meaning (English): {v['verse'].english}"""
         context = "\n\n---\n\n".join(context_parts)
         
         lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
+        extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
         
         prompt = f"""BHAGAVAD GITA VERSES:
 {context}
 
-USER'S QUESTION: {question}
+USER'S QUESTION: {safe_question}
 
 {lang_instruction}
 
@@ -269,6 +278,7 @@ INSTRUCTIONS:
 3. Explain how this eternal wisdom from Lord Krishna applies to their situation
 4. Keep the tone spiritual, compassionate and practical
 5. Don't start with greetings - directly address their question with the Gita's wisdom
+{extra_block}
 
 Provide a helpful response using the wisdom from Bhagavad Gita."""
 
