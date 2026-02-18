@@ -167,12 +167,20 @@ def _is_summary_request(question: str) -> bool:
         "what is this video about", "tell me about this", "overview",
         "what does he say", "what did he say", "what is he saying",
         "brief", "gist", "main points", "key points", "highlights",
+        "key takeaways", "key takeaway", "takeaways", "takeaway",
+        "key learnings", "key learning", "teachings", "main teachings",
+        "important points", "what did maharaj", "what does maharaj",
+        "what is the topic", "what is the subject", "what is discussed",
+        "what is being taught", "theme of this", "topics covered",
     ]
     summary_hi = [
-        "सारांश", "सार", "सारांशित", "संक्षेप", "बताइए", "बताओ",
-        "यह क्या है", "इसमें क्या है", "इसका सारांश", "क्या कहा",
-        "क्या बताया", "विषय क्या है", "मुख्य बात", "किस बारे में",
-        "समझाइए", "समझाओ",
+        "सारांश", "सारांशित", "संक्षेप",
+        "इसका सारांश", "इसका सार", "सार बताइए", "सार बताओ",
+        "इसमें क्या है", "इसमें क्या बताया", "इसमें क्या कहा",
+        "क्या कहा है", "क्या बताया है", "क्या सिखाया",
+        "विषय क्या है", "मुख्य बात", "किस बारे में",
+        "समझाइए", "समझाओ", "मुख्य शिक्षा", "मुख्य सीख",
+        "प्रवचन का सार", "प्रवचन का विषय", "प्रवचन के बारे",
     ]
 
     return (
