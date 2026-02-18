@@ -70,7 +70,7 @@ python run.py
 cd frontend
 npm install
 npm run dev
-```
+``
 
 ### 4. Open
 - Frontend: http://localhost:5173
