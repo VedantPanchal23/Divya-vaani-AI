@@ -157,6 +157,30 @@ def _detect_sensitive_topic(question: str) -> str | None:
     return None
 
 
+def _is_summary_request(question: str) -> bool:
+    """Detect if the user is asking for a summary/explanation of the current video."""
+    q_lower = question.lower().strip()
+    q_text = question.strip()
+
+    summary_en = [
+        "summarize", "summary", "summarise", "explain this", "what is this about",
+        "what is this video about", "tell me about this", "overview",
+        "what does he say", "what did he say", "what is he saying",
+        "brief", "gist", "main points", "key points", "highlights",
+    ]
+    summary_hi = [
+        "सारांश", "सार", "सारांशित", "संक्षेप", "बताइए", "बताओ",
+        "यह क्या है", "इसमें क्या है", "इसका सारांश", "क्या कहा",
+        "क्या बताया", "विषय क्या है", "मुख्य बात", "किस बारे में",
+        "समझाइए", "समझाओ",
+    ]
+
+    return (
+        any(w in q_lower for w in summary_en)
+        or any(w in q_text for w in summary_hi)
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit(settings.RATE_LIMIT_CHAT)
 async def chat(
@@ -196,6 +220,41 @@ async def chat(
         )
         await _persist_chat(db, user, content_id, question, response)
         return response
+
+    # ── Summary / meta-question handling ──
+    if _is_summary_request(question) and content_id:
+        try:
+            video = await crud.get_video_by_id(db, content_id)
+            if video:
+                summary_text = (
+                    video.summary_hi if language == "hi" else video.summary_en
+                ) or video.summary_hi or video.summary_en
+                if summary_text:
+                    response = ChatResponse(
+                        answer=summary_text,
+                        source_type=SourceType.PRAVACHAN,
+                        source_reference=f"Summary of: {video.title_hi or video.title or 'this discourse'}",
+                        audio_url=""
+                    )
+                    await _persist_chat(db, user, content_id, question, response)
+                    return response
+                else:
+                    no_summary_msg = (
+                        "🙏 इस प्रवचन का सारांश अभी उपलब्ध नहीं है। कृपया वीडियो पेज पर 'Generate' बटन दबाकर सारांश बनवाएं, या कोई विशिष्ट प्रश्न पूछें।"
+                        if language == "hi" else
+                        "🙏 The summary for this discourse is not available yet. Please click the 'Generate' button on the video page to create a summary, or ask a specific question."
+                    )
+                    response = ChatResponse(
+                        answer=no_summary_msg,
+                        source_type=SourceType.NOT_FOUND,
+                        source_reference="",
+                        audio_url=""
+                    )
+                    await _persist_chat(db, user, content_id, question, response)
+                    return response
+        except Exception as e:
+            logger.warning(f"Summary lookup failed for {content_id}: {e}")
+            # Fall through to normal RAG search
 
     # ── Sensitive topic detection ──
     sensitivity = _detect_sensitive_topic(question)
