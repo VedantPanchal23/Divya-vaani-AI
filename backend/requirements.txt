@@ -67,11 +67,9 @@ pydub>=0.25.1,<1.0.0
 # ------------------------
 # Text-to-Speech (Optimized for Speed)
 # Edge TTS: PRIMARY - ~1s latency, supports Hindi/English
-# gTTS: FALLBACK - Google TTS for reliability
 # Future: Custom person-specific TTS model (next version)
 # ------------------------
 edge-tts>=7.0.0,<8.0.0
-gTTS>=2.5.0,<3.0.0
 
 # ------------------------
 # Utilities
