@@ -1,9 +1,11 @@
 """
-Divya Vaani AI - LLM Engine
+Divya Vaani AI - LLM Engine (Production Grade)
 Uses Gemini for heavy tasks (summary, explanation) to avoid Groq rate limits.
 Uses Groq for fast Q&A responses.
+Includes query expansion, relevance verification, and context-grounded prompts.
 """
 import logging
+import json
 
 try:
     from groq import AsyncGroq
@@ -24,7 +26,7 @@ def get_groq_client() -> AsyncGroq:
     global _groq_client
     if _groq_client is None:
         _groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY.get_secret_value())
-        logger.info("✅ Groq client initialized")
+        logger.info("Groq client initialized")
     return _groq_client
 
 
@@ -35,80 +37,147 @@ def get_gemini_client():
         try:
             from google import genai
             _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY.get_secret_value())
-            logger.info("✅ Gemini client initialized (google-genai, gemini-2.0-flash)")
+            logger.info("Gemini client initialized (google-genai, gemini-2.0-flash)")
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Gemini: {e}")
+            logger.error(f"Failed to initialize Gemini: {e}")
             return None
     return _gemini_client
 
 
-# System prompts
-SYSTEM_PROMPT = """You are Divya Vaani AI, a spiritual assistant that provides guidance from the teachings of Maharaj Ji (the speaker in the pravachan/discourse).
+# ========== System Prompts ==========
 
-CRITICAL RULES:
-1. Use the provided context to answer - this is from actual spiritual discourses
-2. Find the MOST RELEVANT spiritual teaching from the context that addresses the user's concern
-3. Even if the question is about life struggles, depression, or difficulties - there IS wisdom in the context that applies
-4. ALWAYS cite your source with timestamp (e.g., [02:15 - 02:45])
-5. Respond in the same language as the question (Hindi or English)
-6. NEVER say "I don't have an answer" - the spiritual teachings in the context ALWAYS have relevant wisdom for life's problems
-7. Connect the user's concern to the spiritual teaching - explain how the teaching applies
+SYSTEM_PROMPT_PRAVACHAN = """You are Divya Vaani AI, a deeply compassionate spiritual assistant that guides people using the actual teachings of Maharaj Ji (Premanand Govind Sharan Maharaj) from his pravachans (discourses).
 
-KEY UNDERSTANDING:
-- Questions about not wanting to live, feeling hopeless, life problems → Look for teachings about inner strength, patience (धैर्य), overcoming difficulties, सेवा, भगवदाश्रय
-- The speaker often talks about: staying strong in difficulties, not being परेशान, having patience, service (सेवा), taking God's refuge (भगवदाश्रय)
+CRITICAL RULES — THESE ARE NON-NEGOTIABLE:
+
+1. CONTEXT-GROUNDED ANSWERS ONLY: You MUST answer ONLY from the provided discourse context. If the context does not contain relevant information to answer the question, be HONEST and say the specific discourse does not address this topic directly, but share what related wisdom is available.
+
+2. NEVER FABRICATE: Do NOT invent teachings, make up quotes, or attribute things to Maharaj Ji that are not in the provided context. People's spiritual journey and even their lives may depend on the accuracy of your answers.
+
+3. ALWAYS CITE TIMESTAMPS: When referencing specific teachings, include the timestamp in format [MM:SS - MM:SS].
+
+4. RESPOND IN THE REQUESTED LANGUAGE: Hindi (Devanagari) or English as specified.
+
+5. COMPASSION FIRST: If someone is going through pain, suffering, or dark thoughts, respond with genuine warmth and care. Connect them to relevant spiritual wisdom from the context.
+
+ANSWERING APPROACH:
+- Start with the most relevant teaching from the context
+- Quote or paraphrase Maharaj Ji's actual words with timestamp
+- Explain the deeper meaning and how it applies
+- If the user is struggling, offer hope through the discourse's wisdom
+- Be warm, caring, and authentic — like a trusted spiritual guide
 
 STYLE:
-- Warm, compassionate, caring tone
-- Like a loving spiritual guide offering wisdom
-- Connect the teaching to the user's situation
-- Give hope and practical wisdom from the discourse
+- Start directly with relevant teaching: "Maharaj Ji teaches...", "In this discourse, Maharaj Ji explains..."
+- Do NOT start with greetings like "Dear friend" or "Priya bhakt"
+- Do NOT use second-person forms like "your problem" 
+- Keep answers focused and meaningful — quality over quantity
 
-DO NOT:
-- Start with "प्रिय भाई/बहन", "Dear friend", or any personal greeting
-- Use second person address like "तुम्हारी समस्या", "आपकी परेशानी"
-- Start by addressing the person directly
+NON-SPIRITUAL QUESTIONS:
+If the question is clearly NOT about spirituality, religion, devotion, dharma, moral values, life philosophy, or personal struggles, respond:
+Hindi: "yeh prashna adhyatmik vishay se sambandhit nahi hai. Kripya Maharaj Ji ke pravachanon se juda prashna puchein."
+English: "This question is not related to spiritual topics. Please ask questions related to Maharaj Ji's discourses."
+Do NOT force-fit spiritual context onto unrelated questions."""
 
-DO:
-- Start directly with the relevant teaching or "महाराज जी ने कहा है..."
-- Present the wisdom and then explain its meaning
-- Be warm and compassionate in explanation
-"""
+SYSTEM_PROMPT_GITA = """You are Divya Vaani AI, a spiritual guide who shares the eternal wisdom of Bhagavad Gita. You help seekers understand Lord Krishna's teachings and apply them to life challenges.
+
+CRITICAL RULES:
+1. Only use the provided Gita verses to answer — never fabricate verses or meanings
+2. Reference specific chapter and verse numbers
+3. Explain the teaching and its practical application
+4. Be compassionate and caring — this person is seeking guidance
+5. Make the ancient wisdom relatable to their situation
+
+NOTE: You are sharing Bhagavad Gita wisdom because this question was not found in the available pravachan (discourse) transcripts. Frame your answer as Gita's guidance.
+
+STYLE:
+- Start with the relevant teaching directly  
+- Reference the verse: "In Chapter X, Verse Y, Lord Krishna teaches..."
+- Explain practical application
+- Be warm and encouraging"""
 
 
 def _sanitize_user_input(text: str) -> str:
-    """Sanitize user input to prevent prompt injection attacks."""
-    # Remove common prompt injection patterns
+    """Sanitize user input to prevent prompt injection and jailbreak attacks."""
+    import re
     injection_patterns = [
+        # Direct instruction override
         r'(?i)ignore\s+(all\s+)?previous\s+instructions',
         r'(?i)forget\s+(all\s+)?previous',
         r'(?i)disregard\s+(all\s+)?above',
         r'(?i)override\s+(system|previous)',
+        r'(?i)new\s+instructions?:',
+        # Role hijacking
         r'(?i)you\s+are\s+now\s+',
         r'(?i)act\s+as\s+(?!a\s+spiritual)',
-        r'(?i)new\s+instructions?:',
+        r'(?i)pretend\s+(to\s+be|you\s+are)',
+        r'(?i)role\s*play\s+as',
+        r'(?i)switch\s+to\s+.{0,20}\s+mode',
+        r'(?i)enable\s+.{0,20}\s+mode',
+        # Jailbreak attempts (DAN, Developer Mode, etc.)
+        r'(?i)do\s+anything\s+now',
+        r'(?i)\bDAN\b\s+mode',
+        r'(?i)developer\s+mode',
+        r'(?i)jailbreak',
+        r'(?i)no\s+restrictions',
+        r'(?i)bypass\s+(filter|safety|content)',
+        r'(?i)without\s+(any\s+)?restrictions',
+        r'(?i)uncensored',
+        # System prompt extraction
+        r'(?i)repeat\s+(your\s+)?(system\s+)?prompt',
+        r'(?i)show\s+(me\s+)?(your\s+)?(system|initial)\s+(prompt|instructions)',
+        r'(?i)what\s+(are|were)\s+your\s+(instructions|rules)',
+        r'(?i)print\s+(your\s+)?prompt',
+        # Markdown/HTML injection for system blocks
         r'(?i)system\s*:\s*',
         r'(?i)\[\s*system\s*\]',
         r'(?i)\<\s*system\s*\>',
+        r'(?i)```\s*system',
+        # Token manipulation
+        r'(?i)\[INST\]',
+        r'(?i)\<\|im_start\|\>',
+        r'(?i)\<\|endoftext\|\>',
     ]
-    import re
     for pattern in injection_patterns:
         text = re.sub(pattern, '[filtered]', text)
     return text.strip()
 
+
+def _is_prompt_injection(text: str) -> bool:
+    """Check if the entire message appears to be a prompt injection attempt."""
+    import re
+    text_lower = text.lower().strip()
+    
+    # High-confidence jailbreak signatures
+    jailbreak_signatures = [
+        r'(?i)from\s+now\s+on.*respond.*without',
+        r'(?i)you\s+(?:will|must|should)\s+(?:now\s+)?(?:act|behave|respond)\s+as',
+        r'(?i)(?:here|these)\s+are\s+(?:your\s+)?new\s+(?:instructions|rules)',
+        r'(?i)(?:for|in)\s+(?:this|the)\s+(?:rest|remainder)\s+of\s+(?:this|our)\s+conversation',
+        r'(?i)i\s+want\s+you\s+to\s+(?:act|pretend|behave)\s+(?:as|like)',
+        r'(?i)(?:simulate|emulate|imitate)\s+(?:a|an)\s+(?:AI|bot|assistant)\s+(?:without|that)',
+    ]
+    
+    for pattern in jailbreak_signatures:
+        if re.search(pattern, text_lower):
+            return True
+    
+    return False
+
+
+# ========== Core Q&A Functions ==========
 
 async def generate_answer(question: str, context: str, source_type, language: str = "hi", extra_instruction: str = "") -> str:
     """Generate answer from context using Groq (fast model for low latency)."""
     try:
         client = get_groq_client()
         
-        # Sanitize user input to prevent prompt injection
         safe_question = _sanitize_user_input(question)
         
         lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
         extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
         
-        prompt = f"""SPIRITUAL DISCOURSE CONTEXT (from Maharaj Ji's {source_type.value}):
+        prompt = f"""SPIRITUAL DISCOURSE CONTEXT (from Maharaj Ji's pravachan):
 {context}
 
 USER'S QUESTION/CONCERN: {safe_question}
@@ -116,25 +185,22 @@ USER'S QUESTION/CONCERN: {safe_question}
 {lang_instruction}
 
 INSTRUCTIONS:
-⚠️ CRITICAL RULE: First check — is the user's question about spirituality, religion, devotion, dharma, moral values, life philosophy, or personal struggles? If NO (e.g. it's about food, politics, science, entertainment, general knowledge, personal preferences, or any non-spiritual factual question), you MUST respond ONLY with: "🙏 यह प्रश्न आध्यात्मिक विषय से संबंधित नहीं है। कृपया महाराज जी के प्रवचनों से जुड़ा प्रश्न पूछें।" (Hindi) or "🙏 This question is not related to spiritual topics. Please ask questions related to Maharaj Ji's discourses." (English). Do NOT attempt to answer non-spiritual questions using the discourse context. Do NOT force-fit spiritual teachings onto unrelated topics.
-
-If the question IS spiritual, follow these steps:
-1. Find the most relevant spiritual teaching from the context that addresses the user's concern
-2. Quote or paraphrase the relevant teaching with timestamp
-3. Explain how this teaching applies to their situation
-4. Give them hope and practical guidance based on the discourse
-5. Be compassionate - the user may be going through a difficult time
+1. Find the MOST RELEVANT teaching from the above context that addresses the user's question
+2. If the context directly addresses their concern, quote/paraphrase with timestamp [MM:SS - MM:SS]
+3. Explain how the teaching applies to their situation
+4. If the context does NOT contain relevant information for this specific question, honestly say: "Is pravachan mein is vishay par seedhi charcha nahi hai" (Hindi) or "This particular discourse does not directly address this topic" (English) — and share whatever related wisdom IS available
+5. Be compassionate — the user may be going through a difficult time
+6. NEVER invent quotes or teachings not present in the context
 {extra_block}
 
-Provide a helpful, caring response using the wisdom from the discourse."""
+Provide a helpful, caring, and TRUTHFUL response grounded in the discourse."""
 
-        # Use fast model for Q&A (lower latency)
         model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
         
         response = await client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": SYSTEM_PROMPT_PRAVACHAN},
                 {"role": "user", "content": prompt}
             ],
             temperature=settings.LLM_TEMPERATURE,
@@ -143,11 +209,235 @@ Provide a helpful, caring response using the wisdom from the discourse."""
         
         return response.choices[0].message.content
     except Exception as e:
-        logger.error(f"❌ generate_answer failed: {e}")
+        logger.error(f"generate_answer failed: {e}")
         if language == "hi":
             return "क्षमा करें, उत्तर देने में एक तकनीकी समस्या आई। कृपया पुनः प्रयास करें।"
         return "Sorry, there was a technical issue generating the answer. Please try again."
 
+
+async def generate_gita_answer(question: str, verses: list, language: str = "hi", extra_instruction: str = "") -> str:
+    """Generate answer from Bhagavad Gita verses."""
+    try:
+        client = get_groq_client()
+        
+        safe_question = _sanitize_user_input(question)
+        
+        # Build context from Gita verses
+        context_parts = []
+        for v in verses:
+            verse_text = f"""Chapter {v['verse'].chapter}, Verse {v['verse'].verse}
+Sanskrit: {v['verse'].sanskrit}
+Hindi meaning: {v['verse'].hindi}
+English meaning: {v['verse'].english}"""
+            context_parts.append(verse_text)
+        
+        context = "\n\n---\n\n".join(context_parts)
+        
+        lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
+        extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
+        
+        prompt = f"""BHAGAVAD GITA VERSES:
+{context}
+
+USER'S QUESTION: {safe_question}
+
+{lang_instruction}
+
+INSTRUCTIONS:
+1. This answer is from Bhagavad Gita because no relevant pravachan (discourse) content was found
+2. Reference the specific Gita verse (chapter and verse number)
+3. Explain how this eternal wisdom from Lord Krishna applies to their situation
+4. Keep the tone spiritual, compassionate, and practical
+5. Start directly with the teaching — no greetings
+{extra_block}
+
+Provide a helpful response using the wisdom from Bhagavad Gita."""
+
+        model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_GITA},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"generate_gita_answer failed: {e}")
+        if language == "hi":
+            return "क्षमा करें, भगवद्गीता से उत्तर देने में एक तकनीकी समस्या आई। कृपया पुनः प्रयास करें।"
+        return "Sorry, there was a technical issue generating the answer from Bhagavad Gita. Please try again."
+
+
+async def generate_not_found(language: str = "hi") -> str:
+    """Generate 'not found' response."""
+    if language == "hi":
+        return "क्षमा करें, इस प्रश्न का उत्तर उपलब्ध प्रवचनों में नहीं मिला। कृपया कोई अन्य आध्यात्मिक प्रश्न पूछें या अपना प्रश्न दूसरे शब्दों में पूछें।"
+    return "I'm sorry, I couldn't find an answer to this question in the available discourses. Please try asking another spiritual question or rephrase your question."
+
+
+# ========== Advanced Q&A Functions ==========
+
+async def generate_search_queries(question: str, language: str = "hi") -> list:
+    """
+    Generate multiple search query variants for better retrieval.
+    Takes the user's question and creates 2-3 semantic variants
+    that capture different aspects/phrasings of the same intent.
+    """
+    try:
+        client = get_groq_client()
+        
+        prompt = f"""Given this spiritual question, generate 2-3 search query variants in Hindi (Devanagari) that capture different aspects of the same question. These will be used to search through Hindi spiritual discourse transcripts.
+
+Original question: {question}
+
+Rules:
+- Each variant should use different Hindi words/phrases for the same concept
+- Include spiritual/religious vocabulary (भक्ति, धर्म, कर्म, सेवा, etc.) where relevant
+- Keep each variant concise (5-15 words)
+- At least one variant should be in Hindi even if the original is in English
+
+Return ONLY a JSON array of strings, nothing else. Example: ["query1", "query2", "query3"]"""
+
+        model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.4,
+            max_tokens=300
+        )
+        
+        text = response.choices[0].message.content.strip()
+        
+        # Clean up JSON response
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        
+        queries = json.loads(text)
+        if isinstance(queries, list) and len(queries) > 0:
+            logger.info(f"Generated {len(queries)} search queries for: {question[:50]}...")
+            return queries[:3]  # Max 3 variants
+        
+        return []
+    except Exception as e:
+        logger.warning(f"Query expansion failed (non-critical): {e}")
+        return []
+
+
+async def verify_context_relevance(question: str, context: str, language: str = "hi") -> dict:
+    """
+    LLM-based verification that retrieved context is actually relevant to the question.
+    Returns {"relevant": bool, "confidence": float, "reason": str}
+    
+    This is a critical guardrail — prevents the system from fabricating answers
+    from irrelevant context, which could mislead people seeking spiritual guidance.
+    """
+    try:
+        client = get_groq_client()
+        
+        prompt = f"""You are a relevance judge. Determine if the following discourse context actually contains information relevant to answering the user's question.
+
+QUESTION: {question}
+
+DISCOURSE CONTEXT:
+{context[:3000]}
+
+Evaluate:
+1. Does the context contain teachings or information that DIRECTLY address the question?
+2. Is there meaningful overlap between what the user is asking and what the discourse discusses?
+3. Would using this context lead to an ACCURATE, helpful answer?
+
+Respond with ONLY a JSON object:
+{{"relevant": true/false, "confidence": 0.0-1.0, "reason": "brief explanation"}}
+
+Be STRICT — if the context is only vaguely related or would force a stretched interpretation, mark as NOT relevant. People's spiritual wellbeing depends on honest answers."""
+
+        model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=200
+        )
+        
+        text = response.choices[0].message.content.strip()
+        
+        # Clean up JSON
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        
+        result = json.loads(text)
+        logger.info(f"Relevance check: relevant={result.get('relevant')}, confidence={result.get('confidence')}, reason={result.get('reason', '')[:80]}")
+        return result
+    except Exception as e:
+        logger.warning(f"Relevance check failed (allowing answer): {e}")
+        # On failure, allow the answer through (fail-open)
+        return {"relevant": True, "confidence": 0.5, "reason": "Verification failed, allowing answer"}
+
+
+# ========== Translation & Language ==========
+
+async def translate_to_hindi(english_text: str) -> str:
+    """
+    Translate English text to Hindi for better semantic search.
+    The transcripts are in Hindi, so translating helps cross-lingual matching.
+    Enhanced with spiritual vocabulary hints for better translation.
+    """
+    client = get_groq_client()
+    
+    prompt = f"""Translate this English spiritual/religious question to Hindi (Devanagari script).
+Use appropriate spiritual vocabulary: भक्ति (devotion), धर्म (dharma), कर्म (karma), सेवा (service), 
+कृपा (grace), ज्ञान (knowledge), वैराग्य (detachment), मोक्ष (liberation), 
+धैर्य (patience), शांति (peace), प्रेम (love), गुरु (guru), महाराज (maharaj).
+
+Only output the Hindi translation, nothing else.
+
+English: {english_text}
+Hindi:"""
+    
+    try:
+        response = await client.chat.completions.create(
+            model=settings.LLM_MODEL_FAST,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=200
+        )
+        hindi = response.choices[0].message.content.strip()
+        logger.info(f"Translated '{english_text}' -> '{hindi}'")
+        return hindi
+    except Exception as e:
+        logger.warning(f"Translation failed: {e}")
+        return english_text
+
+
+def is_english_text(text: str) -> bool:
+    """Check if text is primarily English (ASCII letters)."""
+    ascii_letters = sum(1 for c in text if c.isascii() and c.isalpha())
+    total_letters = sum(1 for c in text if c.isalpha())
+    
+    if total_letters == 0:
+        return False
+    
+    return (ascii_letters / total_letters) > 0.7
+
+
+# ========== Summary & Explanation ==========
 
 async def generate_summary(text: str, language: str = "hi") -> str:
     """Generate summary using Gemini (to avoid Groq rate limits)."""
@@ -162,7 +452,6 @@ Provide:
 TRANSCRIPT:
 {text[:15000]}"""
 
-    # Try Gemini first (no rate limits like Groq)
     gemini = get_gemini_client()
     if gemini:
         try:
@@ -174,7 +463,7 @@ TRANSCRIPT:
                     model='gemini-2.0-flash', contents=prompt
                 )
             )
-            logger.info(f"✅ Summary generated with Gemini ({language})")
+            logger.info(f"Summary generated with Gemini ({language})")
             return response.text
         except Exception as e:
             logger.warning(f"Gemini failed, falling back to Groq: {e}")
@@ -211,7 +500,6 @@ Keep the tone spiritual and respectful.
 TRANSCRIPT:
 {text[:15000]}"""
 
-    # Try Gemini first (no rate limits like Groq)
     gemini = get_gemini_client()
     if gemini:
         try:
@@ -223,7 +511,7 @@ TRANSCRIPT:
                     model='gemini-2.0-flash', contents=prompt
                 )
             )
-            logger.info(f"✅ Explanation generated with Gemini ({language})")
+            logger.info(f"Explanation generated with Gemini ({language})")
             return response.text
         except Exception as e:
             logger.warning(f"Gemini failed, falling back to Groq: {e}")
@@ -243,115 +531,6 @@ TRANSCRIPT:
     return response.choices[0].message.content
 
 
-async def generate_gita_answer(question: str, verses: list, language: str = "hi", extra_instruction: str = "") -> str:
-    """Generate answer from Bhagavad Gita verses."""
-    try:
-        client = get_groq_client()
-        
-        # Sanitize user input to prevent prompt injection
-        safe_question = _sanitize_user_input(question)
-        
-        # Build context from Gita verses
-        context_parts = []
-        for v in verses:
-            verse_text = f"""📖 अध्याय {v['verse'].chapter}, श्लोक {v['verse'].verse}
-संस्कृत: {v['verse'].sanskrit}
-अर्थ (हिंदी): {v['verse'].hindi}
-Meaning (English): {v['verse'].english}"""
-            context_parts.append(verse_text)
-        
-        context = "\n\n---\n\n".join(context_parts)
-        
-        lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
-        extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
-        
-        prompt = f"""BHAGAVAD GITA VERSES:
-{context}
-
-USER'S QUESTION: {safe_question}
-
-{lang_instruction}
-
-INSTRUCTIONS:
-1. This question was not found in Maharaj Ji's discourses, so we are using Bhagavad Gita wisdom
-2. Reference the relevant Gita verse (chapter and verse number) 
-3. Explain how this eternal wisdom from Lord Krishna applies to their situation
-4. Keep the tone spiritual, compassionate and practical
-5. Don't start with greetings - directly address their question with the Gita's wisdom
-{extra_block}
-
-Provide a helpful response using the wisdom from Bhagavad Gita."""
-
-        model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
-        
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a spiritual guide who explains Bhagavad Gita's eternal wisdom. You help seekers understand Lord Krishna's teachings and apply them to modern life challenges."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=settings.LLM_TEMPERATURE,
-            max_tokens=settings.LLM_MAX_TOKENS
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"❌ generate_gita_answer failed: {e}")
-        if language == "hi":
-            return "क्षमा करें, भगवद्गीता से उत्तर देने में एक तकनीकी समस्या आई। कृपया पुनः प्रयास करें।"
-        return "Sorry, there was a technical issue generating the answer from Bhagavad Gita. Please try again."
-
-
-async def generate_not_found(language: str = "hi") -> str:
-    """Generate 'not found' response."""
-    if language == "hi":
-        return "मुझे खेद है, इस प्रश्न का उत्तर उपलब्ध स्रोतों में नहीं मिला। कृपया कोई अन्य प्रश्न पूछें।"
-    return "I'm sorry, I couldn't find an answer to this question in the available sources. Please ask another question."
-
-
-async def translate_to_hindi(english_text: str) -> str:
-    """
-    Translate English text to Hindi for better semantic search.
-    The transcripts are in Hindi, so translating helps cross-lingual matching.
-    """
-    client = get_groq_client()
-    
-    prompt = f"""Translate this English spiritual/religious question to Hindi (Devanagari script).
-Only output the Hindi translation, nothing else.
-
-English: {english_text}
-Hindi:"""
-    
-    try:
-        response = await client.chat.completions.create(
-            model=settings.LLM_MODEL_FAST,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=200
-        )
-        hindi = response.choices[0].message.content.strip()
-        logger.info(f"🔄 Translated '{english_text}' → '{hindi}'")
-        return hindi
-    except Exception as e:
-        logger.warning(f"Translation failed: {e}")
-        return english_text  # Return original if translation fails
-
-
-def is_english_text(text: str) -> bool:
-    """Check if text is primarily English (ASCII letters)."""
-    # Count ASCII letters vs non-ASCII characters
-    ascii_letters = sum(1 for c in text if c.isascii() and c.isalpha())
-    total_letters = sum(1 for c in text if c.isalpha())
-    
-    if total_letters == 0:
-        return False
-    
-    # If more than 70% of letters are ASCII, it's English
-    return (ascii_letters / total_letters) > 0.7
-
-
 async def generate_video_themes(transcript: str) -> dict:
     """
     Generate themes, main topic, and key teachings from transcript.
@@ -359,7 +538,6 @@ async def generate_video_themes(transcript: str) -> dict:
     """
     client = get_groq_client()
     
-    # Truncate transcript if too long (Groq has token limits)
     max_chars = 8000
     truncated_transcript = transcript[:max_chars] if len(transcript) > max_chars else transcript
     
@@ -372,7 +550,7 @@ async def generate_video_themes(transcript: str) -> dict:
 5. **key_teachings** (array): 2-4 practical teachings or takeaways (in Hindi)
 
 IMPORTANT: 
-- Focus on the actual spiritual content, not the chanting parts (राधा राधा etc.)
+- Focus on the actual spiritual content, not the chanting parts
 - Identify the core teachings of Maharaj Ji
 - Be concise and specific
 
@@ -403,7 +581,7 @@ TRANSCRIPT:
         )
         text = response.choices[0].message.content.strip()
         
-        # Clean up response - remove markdown code blocks if present
+        # Clean up response
         if text.startswith("```json"):
             text = text[7:]
         if text.startswith("```"):
@@ -412,14 +590,12 @@ TRANSCRIPT:
             text = text[:-3]
         text = text.strip()
         
-        # Parse JSON
-        import json
         metadata = json.loads(text)
-        logger.info(f"✅ Generated themes: {metadata.get('themes', [])}")
+        logger.info(f"Generated themes: {metadata.get('themes', [])}")
         return metadata
         
     except Exception as e:
-        logger.error(f"❌ Failed to generate themes: {e}")
+        logger.error(f"Failed to generate themes: {e}")
         return {
             "main_topic": "",
             "main_topic_en": "",
