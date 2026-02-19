@@ -1092,6 +1092,51 @@ a:hover { color: var(--color-accent-hover); }
 /* TTS in chat */
 .chat-msg-tts { margin-top: 8px; }
 
+/* Source badge — text only, no emojis */
+.chat-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+.chat-source-badge .source-label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.chat-source-badge .source-ref {
+  font-weight: 400;
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+
+/* Pravachan (discourse) source — warm amber */
+.chat-source-badge.source-pravachan {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-deep);
+  border: 1px solid rgba(217, 119, 6, 0.15);
+}
+[data-theme="dark"] .chat-source-badge.source-pravachan {
+  background: var(--color-accent-surface);
+  color: var(--color-accent);
+}
+
+/* Gita source — indigo */
+.chat-source-badge.source-gita {
+  background: var(--color-secondary-subtle);
+  color: var(--color-secondary);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
+[data-theme="dark"] .chat-source-badge.source-gita {
+  background: var(--color-secondary-surface);
+  color: var(--color-secondary);
+}
+
 /* Loading */
 .chat-loading {
   display: flex;
