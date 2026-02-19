@@ -177,7 +177,7 @@ class TestChatHelpers:
 
     def test_expand_question_no_match(self):
         from api.chat_routes import _expand_question_for_search
-        q = "What is the meaning of life?"
+        q = "What is the weather today?"
         result = _expand_question_for_search(q)
         assert result == q  # No expansion when no keyword matches
 
