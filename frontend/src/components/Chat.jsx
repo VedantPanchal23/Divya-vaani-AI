@@ -76,7 +76,7 @@ function Chat({ sessionId, onNewMessage }) {
                 try {
                     const saved = localStorage.getItem(chatKey);
                     if (saved) setMessages(JSON.parse(saved));
-                } catch {}
+                } catch { }
             }).finally(() => setHistoryLoading(false));
         }
     }, [isAuthenticated, sessionId]);
@@ -107,7 +107,7 @@ function Chat({ sessionId, onNewMessage }) {
             wantListeningRef.current = false;
             cancelAnimationFrame(animFrameRef.current);
             if (recognitionRef.current) {
-                try { recognitionRef.current.abort(); } catch {}
+                try { recognitionRef.current.abort(); } catch { }
                 recognitionRef.current = null;
             }
             if (streamRef.current) {
@@ -115,7 +115,7 @@ function Chat({ sessionId, onNewMessage }) {
                 streamRef.current = null;
             }
             if (audioCtxRef.current) {
-                try { audioCtxRef.current.close(); } catch {}
+                try { audioCtxRef.current.close(); } catch { }
                 audioCtxRef.current = null;
             }
         };
@@ -191,7 +191,7 @@ function Chat({ sessionId, onNewMessage }) {
             streamRef.current = null;
         }
         if (audioCtxRef.current) {
-            try { audioCtxRef.current.close(); } catch {}
+            try { audioCtxRef.current.close(); } catch { }
             audioCtxRef.current = null;
         }
     }, []);
@@ -207,7 +207,7 @@ function Chat({ sessionId, onNewMessage }) {
 
         // Abort any existing instance
         if (recognitionRef.current) {
-            try { recognitionRef.current.abort(); } catch {}
+            try { recognitionRef.current.abort(); } catch { }
             recognitionRef.current = null;
         }
 
@@ -221,11 +221,15 @@ function Chat({ sessionId, onNewMessage }) {
         recognition.interimResults = true;
         recognition.maxAlternatives = 1;
 
-        // Set language — default to Hindi for this app
+        // Set language — auto-detect uses Hindi primary (most users speak Hindi)
+        // with fallback logic in onresult to detect English
         if (outputLanguage === 'en') {
             recognition.lang = 'en-US';
+        } else if (outputLanguage === 'hi') {
+            recognition.lang = 'hi-IN';
         } else {
-            // Auto or Hindi → use Hindi
+            // Auto mode: start with Hindi (browser will still transcribe English words)
+            // The speech API handles code-mixed Hindi-English well in hi-IN mode
             recognition.lang = 'hi-IN';
         }
 
@@ -333,7 +337,7 @@ function Chat({ sessionId, onNewMessage }) {
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.stop();
-            } catch {}
+            } catch { }
         }
         setIsListening(false);
         setInterimText('');
@@ -412,7 +416,7 @@ function Chat({ sessionId, onNewMessage }) {
             setConfirmingClear(false);
             // Also clear from DB for authenticated users
             if (isAuthenticated && sessionId) {
-                clearChatHistoryApi(sessionId).catch(() => {});
+                clearChatHistoryApi(sessionId).catch(() => { });
             }
         } else {
             setConfirmingClear(true);
@@ -422,8 +426,28 @@ function Chat({ sessionId, onNewMessage }) {
     };
 
     const detectHindi = (text) => {
+        if (!text) return false;
         const hindiRegex = /[\u0900-\u097F]/;
         return hindiRegex.test(text);
+    };
+
+    // Get source label as text (no emojis per user preference)
+    const getSourceLabel = (source) => {
+        if (!source) return null;
+        switch (source) {
+            case 'pravachan': return 'From Discourse';
+            case 'bhagavad_gita': return 'From Bhagavad Gita';
+            default: return null;
+        }
+    };
+
+    const getSourceClass = (source) => {
+        if (!source) return '';
+        switch (source) {
+            case 'pravachan': return 'source-pravachan';
+            case 'bhagavad_gita': return 'source-gita';
+            default: return '';
+        }
     };
 
     const getMicBarColor = () => {
@@ -495,6 +519,16 @@ function Chat({ sessionId, onNewMessage }) {
                             <p style={{ fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : undefined }}>
                                 {msg.content}
                             </p>
+
+                            {/* Source badge — text only, no emojis */}
+                            {msg.role === 'assistant' && msg.source && getSourceLabel(msg.source) && (
+                                <div className={`chat-source-badge ${getSourceClass(msg.source)}`}>
+                                    <span className="source-label">{getSourceLabel(msg.source)}</span>
+                                    {msg.sourceRef && (
+                                        <span className="source-ref">{msg.sourceRef}</span>
+                                    )}
+                                </div>
+                            )}
 
                             {msg.role === 'assistant' && !msg.isError && (
                                 <div className="chat-msg-tts">
