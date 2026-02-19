@@ -111,7 +111,10 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"  # Best for Hindi+English retrieval
     EMBEDDING_DIM: int = 384  # Dimension for this model
     TOP_K: int = 10  # Retrieve more chunks for better context
-    SIMILARITY_THRESHOLD: float = 0.4  # Balanced threshold - prevents irrelevant low-score matches
+    SIMILARITY_THRESHOLD: float = 0.45  # Threshold for transcript semantic search
+    GITA_SIMILARITY_THRESHOLD: float = 0.60  # Higher threshold for Gita (prevents false matches)
+    HYBRID_SEARCH_ENABLED: bool = True  # Enable hybrid semantic+keyword search
+    RELEVANCE_CHECK_ENABLED: bool = True  # LLM verifies context relevance before answering
     
     # Transcription Enhancement Settings
     PARALLEL_TRANSCRIPTION: bool = True  # Process chunks in parallel for speed
