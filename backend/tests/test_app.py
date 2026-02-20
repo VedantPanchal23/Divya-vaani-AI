@@ -250,6 +250,103 @@ class TestAPIEndpoints:
         })
         assert response.status_code == 400
 
+    def test_chat_video_scope_skips_gita_fallback(self):
+        """When transcript_id is provided, failed transcript retrieval should not auto-fallback to Gita."""
+        from data.schema import GitaVerse
+
+        fake_gita_results = [{
+            "verse": GitaVerse(chapter=2, verse=47, hindi="x", english="y"),
+            "score": 0.95,
+        }]
+
+        with patch(
+            "api.chat_routes.rag_engine.search_transcripts_hybrid",
+            side_effect=[[], []],
+        ) as mock_hybrid, patch(
+            "api.chat_routes.rag_engine.search_gita",
+            return_value=fake_gita_results,
+        ) as mock_search_gita, patch(
+            "api.chat_routes.llm_engine.generate_search_queries",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "api.chat_routes.llm_engine.generate_not_found",
+            new=AsyncMock(return_value="not-found-from-transcript"),
+        ), patch(
+            "api.chat_routes.llm_engine.is_english_text",
+            return_value=False,
+        ), patch(
+            "api.chat_routes.llm_engine._is_prompt_injection",
+            return_value=False,
+        ):
+            response = self.client.post("/api/chat", json={
+                "question": "मन को कैसे शांत करें?",
+                "transcript_id": "video-123",
+                "language": "hi",
+            })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["source_type"] == "not_found"
+        assert data["answer"] == "not-found-from-transcript"
+        assert mock_hybrid.call_count == 2  # strict + relaxed retry
+        assert mock_search_gita.call_count == 0  # no Gita fallback in video-scoped mode
+
+    def test_chat_relaxed_transcript_retry_returns_pravachan(self):
+        """If strict threshold misses and relaxed retry finds context, answer should come from pravachan."""
+        from config import settings
+        from data.schema import TranscriptChunk
+
+        fake_chunk = TranscriptChunk(
+            id="chunk-1",
+            text="महाराज जी बताते हैं कि मन को साधना और नाम जप से स्थिर किया जा सकता है।",
+            start_time=12.0,
+            end_time=24.0,
+        )
+        fake_result = {
+            "chunk": fake_chunk,
+            "score": 0.82,
+            "semantic_score": 0.82,
+            "keyword_score": 0.10,
+            "rrf_score": 0.01,
+        }
+
+        mock_generate_answer = AsyncMock(return_value="transcript-grounded-answer")
+
+        with patch(
+            "api.chat_routes.rag_engine.search_transcripts_hybrid",
+            side_effect=[[], [fake_result]],
+        ) as mock_hybrid, patch(
+            "api.chat_routes.llm_engine.generate_search_queries",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "api.chat_routes.llm_engine.generate_answer",
+            new=mock_generate_answer,
+        ), patch(
+            "api.chat_routes.llm_engine.generate_not_found",
+            new=AsyncMock(return_value="not-found"),
+        ), patch(
+            "api.chat_routes.llm_engine.is_english_text",
+            return_value=False,
+        ), patch(
+            "api.chat_routes.llm_engine._is_prompt_injection",
+            return_value=False,
+        ):
+            response = self.client.post("/api/chat", json={
+                "question": "मन को कैसे नियंत्रित करें?",
+                "transcript_id": "video-123",
+                "language": "hi",
+            })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["source_type"] == "pravachan"
+        assert data["answer"] == "transcript-grounded-answer"
+        assert mock_hybrid.call_count == 2
+        second_call_kwargs = mock_hybrid.call_args_list[1].kwargs
+        assert "semantic_min_score" in second_call_kwargs
+        assert second_call_kwargs["semantic_min_score"] < settings.SIMILARITY_THRESHOLD
+        assert mock_generate_answer.await_count == 1
+
     def test_tts_empty_text(self):
         response = self.client.post("/api/tts", json={
             "text": "",

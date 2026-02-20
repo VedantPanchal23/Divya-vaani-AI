@@ -226,6 +226,7 @@ def search_transcripts_hybrid(
     top_k: int = 8,
     semantic_weight: float = 0.65,
     keyword_weight: float = 0.35,
+    semantic_min_score: Optional[float] = None,
 ) -> List[dict]:
     """
     Hybrid search combining semantic (FAISS) and keyword (BM25-style) results.
@@ -234,7 +235,12 @@ def search_transcripts_hybrid(
     Returns list of {"chunk": TranscriptChunk, "score": float, "semantic_score": float, "keyword_score": float}
     """
     # Get semantic results (more candidates for fusion)
-    semantic_results = search_transcripts_with_scores(query, transcript_id, top_k=top_k * 2)
+    semantic_results = search_transcripts_with_scores(
+        query,
+        transcript_id,
+        top_k=top_k * 2,
+        min_score=semantic_min_score,
+    )
     
     # Get keyword results
     keyword_results = search_transcripts_keyword(query, transcript_id, top_k=top_k * 2)
@@ -355,22 +361,36 @@ def _remove_transcript_from_index(transcript_id: str):
     logger.info(f"Removed {removed_count} old entries for transcript {transcript_id}")
 
 
-def search_transcripts(query: str, transcript_id: str = None, top_k: int = 10) -> List[TranscriptChunk]:
+def search_transcripts(
+    query: str,
+    transcript_id: str = None,
+    top_k: int = 10,
+    min_score: Optional[float] = None,
+) -> List[TranscriptChunk]:
     """
     Search transcripts for relevant chunks.
     Uses semantic similarity to find chunks from spiritual discourses.
     """
-    results = search_transcripts_with_scores(query, transcript_id, top_k)
+    results = search_transcripts_with_scores(
+        query, transcript_id, top_k, min_score=min_score
+    )
     return [r["chunk"] for r in results]
 
 
-def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k: int = 10) -> List[dict]:
+def search_transcripts_with_scores(
+    query: str,
+    transcript_id: str = None,
+    top_k: int = 10,
+    min_score: Optional[float] = None,
+) -> List[dict]:
     """
     Search transcripts and return chunks WITH their similarity scores.
     Returns list of {"chunk": TranscriptChunk, "score": float}
     """
     global _transcript_meta
     
+    threshold = settings.SIMILARITY_THRESHOLD if min_score is None else float(min_score)
+
     # Load index (if not loaded yet)
     with _transcript_lock:
         _load_transcript_index()
@@ -412,7 +432,7 @@ def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k:
             
             score = float(scores[0][i])
             
-            if score < settings.SIMILARITY_THRESHOLD:
+            if score < threshold:
                 skipped_threshold += 1
                 continue
             
@@ -450,7 +470,7 @@ def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k:
             f"[Search] 0 results for tid={transcript_id} (query='{query[:50]}...'). "
             f"Index has {index_total} vectors, {matching_chunks} for this tid. "
             f"Skipped: tid_filter={skipped_tid}, threshold={skipped_threshold}, short={skipped_short}. "
-            f"Top raw score={top_raw:.4f}, threshold={settings.SIMILARITY_THRESHOLD}"
+            f"Top raw score={top_raw:.4f}, threshold={threshold}"
         )
     
     return results

@@ -313,6 +313,23 @@ def _is_explicit_gita_question(question: str) -> bool:
     return is_gita
 
 
+def _should_use_gita_fallback(
+    is_gita_question: bool,
+    transcript_results: list,
+    content_id: Optional[str],
+) -> bool:
+    """
+    Decide if Bhagavad Gita fallback should be used.
+    When user is scoped to a specific discourse, stay transcript-first and
+    don't auto-switch to Gita unless the user explicitly asks for it.
+    """
+    if is_gita_question:
+        return True
+    if content_id:
+        return False
+    return not transcript_results
+
+
 # ========== Main Chat Endpoint ==========
 
 @router.post("/chat", response_model=ChatResponse)
@@ -465,6 +482,28 @@ async def chat(
                 expanded_query, transcript_id=content_id, top_k=8
             )
 
+        # If strict content filtering returned nothing, retry with a slightly lower threshold.
+        # This helps recover valid matches from noisy ASR transcripts.
+        if content_id and not transcript_results:
+            relaxed_threshold = max(settings.SIMILARITY_THRESHOLD - 0.12, 0.25)
+            logger.info(
+                f"[Q&A] No strict hits for content_id={content_id}; retrying with relaxed threshold={relaxed_threshold:.2f}"
+            )
+            if settings.HYBRID_SEARCH_ENABLED:
+                transcript_results = rag_engine.search_transcripts_hybrid(
+                    expanded_query,
+                    transcript_id=content_id,
+                    top_k=8,
+                    semantic_min_score=relaxed_threshold,
+                )
+            else:
+                transcript_results = rag_engine.search_transcripts_with_scores(
+                    expanded_query,
+                    transcript_id=content_id,
+                    top_k=8,
+                    min_score=relaxed_threshold,
+                )
+
         # Get current best score
         initial_best = transcript_results[0].get("score", 0) if transcript_results else 0.0
 
@@ -542,7 +581,7 @@ async def chat(
                 )
                 
                 # If low confidence AND low semantic score, don't use this context
-                if not context_is_relevant and relevance_confidence > 0.6:
+                if not context_is_relevant and relevance_confidence >= 0.75:
                     logger.info("[Q&A] Context rejected by relevance check — will try Gita or not-found")
                     transcript_results = []  # Clear so we fall through
                 elif not context_is_relevant and best_transcript_score < 0.50:
@@ -580,7 +619,12 @@ async def chat(
     # ── Step 8: GITA FALLBACK — only when transcripts gave nothing ──
     gita_results = []
     
-    if is_gita_question or not transcript_results:
+    use_gita_fallback = _should_use_gita_fallback(
+        is_gita_question=is_gita_question,
+        transcript_results=transcript_results,
+        content_id=content_id,
+    )
+    if use_gita_fallback:
         gita_results = rag_engine.search_gita(search_query, top_k=3)
         
         if gita_results:
