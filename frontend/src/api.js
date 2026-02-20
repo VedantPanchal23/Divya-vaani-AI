@@ -117,22 +117,36 @@ export async function getTranscripts() {
  * @param {string} language - Response language ("hi" or "en")
  */
 export async function sendMessage(question, transcriptId = null, language = 'hi') {
-    const response = await fetch(`${API_BASE}/chat`, {
-        method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-            question,
-            transcript_id: transcriptId,
-            language
-        }),
-    });
+    // Use AbortController with 3-minute timeout — embedding models on CPU can be slow
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 180_000); // 3 minutes
 
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Failed to get answer');
+    try {
+        const response = await fetch(`${API_BASE}/chat`, {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                question,
+                transcript_id: transcriptId,
+                language
+            }),
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to get answer');
+        }
+
+        return response.json();
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            throw new Error('The request took too long. Please try again with a shorter question.');
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeoutId);
     }
-
-    return response.json();
 }
 
 /**

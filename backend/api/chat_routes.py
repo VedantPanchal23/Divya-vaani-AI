@@ -465,8 +465,13 @@ async def chat(
                 expanded_query, transcript_id=content_id, top_k=8
             )
 
-        # If primary search gave weak results, try additional search queries
-        if len(transcript_results) < 3 or (transcript_results and transcript_results[0].get("score", 0) < 0.55):
+        # Get current best score
+        initial_best = transcript_results[0].get("score", 0) if transcript_results else 0.0
+
+        # Only do expensive multi-query expansion if initial search found SOME results
+        # If best_score is near 0, the topic simply isn't in our transcripts — expansion won't help
+        # and wastes 75+ seconds of CPU embedding time
+        if initial_best >= 0.30 and (len(transcript_results) < 3 or initial_best < 0.55):
             for extra_q in search_queries[1:]:  # Skip first (already searched)
                 try:
                     if settings.HYBRID_SEARCH_ENABLED:
@@ -486,6 +491,8 @@ async def chat(
                             existing_ids.add(r["chunk"].id)
                 except Exception as e:
                     logger.warning(f"Extra query search failed: {e}")
+        elif initial_best < 0.30:
+            logger.info(f"[Q&A] Skipping multi-query expansion (best_score={initial_best:.3f} too low, not in transcripts)")
 
         # Sort by score and take top results
         transcript_results.sort(key=lambda x: x.get("score", 0), reverse=True)

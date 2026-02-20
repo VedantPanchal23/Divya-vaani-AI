@@ -371,15 +371,20 @@ def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k:
     """
     global _transcript_meta
     
+    # Load index (if not loaded yet)
     with _transcript_lock:
         _load_transcript_index()
         
         if _transcript_index.ntotal == 0:
+            logger.warning("[Search] Transcript index is empty (0 vectors)")
             return []
         
-        # Embed query (with query prefix for E5)
-        q_emb = _embed_text([query], is_query=True)
-        
+        index_total = _transcript_index.ntotal
+    
+    # Embed query OUTSIDE the lock — this is the slow step (27s on CPU)
+    q_emb = _embed_text([query], is_query=True)
+    
+    with _transcript_lock:
         # If filtering by transcript_id, search more aggressively
         if transcript_id:
             k = min(500, _transcript_index.ntotal)
@@ -390,6 +395,9 @@ def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k:
         
         results = []
         seen_texts = set()  # De-duplicate near-identical chunks
+        skipped_tid = 0
+        skipped_threshold = 0
+        skipped_short = 0
         
         for i, idx in enumerate(indices[0]):
             if idx < 0 or idx >= len(_transcript_meta):
@@ -399,16 +407,19 @@ def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k:
             
             # Filter by transcript_id if specified
             if transcript_id and meta["transcript_id"] != transcript_id:
+                skipped_tid += 1
                 continue
             
             score = float(scores[0][i])
             
             if score < settings.SIMILARITY_THRESHOLD:
+                skipped_threshold += 1
                 continue
             
             # Skip very short chunks (less meaningful)
             text = meta["text"].strip()
             if len(text) < 20:
+                skipped_short += 1
                 continue
             
             # De-duplicate: skip if we already have a very similar chunk
@@ -429,6 +440,18 @@ def search_transcripts_with_scores(query: str, transcript_id: str = None, top_k:
             
             if len(results) >= top_k:
                 break
+    
+    # Diagnostic logging for zero-result searches
+    if not results and transcript_id:
+        # Count how many chunks exist for this transcript_id
+        matching_chunks = sum(1 for m in _transcript_meta if m["transcript_id"] == transcript_id)
+        top_raw = float(scores[0][0]) if scores is not None and len(scores[0]) > 0 else 0.0
+        logger.warning(
+            f"[Search] 0 results for tid={transcript_id} (query='{query[:50]}...'). "
+            f"Index has {index_total} vectors, {matching_chunks} for this tid. "
+            f"Skipped: tid_filter={skipped_tid}, threshold={skipped_threshold}, short={skipped_short}. "
+            f"Top raw score={top_raw:.4f}, threshold={settings.SIMILARITY_THRESHOLD}"
+        )
     
     return results
 
