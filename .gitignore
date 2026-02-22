@@ -65,3 +65,8 @@ backend/models/
 !backend/data/index/*.faiss
 !backend/data/index/*.json
 Input/
+
+# Audit output files
+backend/audit_output*.txt
+backend/audit_results*.txt
+backend/audit_clean*.txt
