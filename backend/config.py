@@ -58,9 +58,9 @@ class Settings(BaseSettings):
     
     # LLM Settings
     LLM_MODEL: str = "llama-3.3-70b-versatile"  # For summaries/explanations (quality)
-    LLM_MODEL_FAST: str = "llama-3.1-8b-instant"  # For Q&A (speed) - ~5x faster
+    LLM_MODEL_FAST: str = "llama-3.3-70b-versatile"  # For Q&A — quality matters more than speed for spiritual guidance
     LLM_TEMPERATURE: float = 0.3
-    LLM_MAX_TOKENS: int = 2000
+    LLM_MAX_TOKENS: int = 3000  # Allow rich, detailed answers
     
     # TTS Settings (Optimized for Speed)
     TTS_MODE: str = "fast"         # "fast" (Edge TTS - low latency) or "custom" (future custom TTS model)
@@ -111,8 +111,9 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"  # Best for Hindi+English retrieval
     EMBEDDING_DIM: int = 384  # Dimension for this model
     TOP_K: int = 10  # Retrieve more chunks for better context
-    SIMILARITY_THRESHOLD: float = 0.45  # Threshold for transcript semantic search
-    GITA_SIMILARITY_THRESHOLD: float = 0.60  # Higher threshold for Gita (prevents false matches)
+    SIMILARITY_THRESHOLD: float = 0.35  # Lowered: Hindi ASR transcripts often score 0.35-0.50
+    GITA_EXPLICIT_THRESHOLD: float = 0.45  # Lower threshold for explicit Gita questions (broader results)
+    GITA_FALLBACK_THRESHOLD: float = 0.60  # Higher threshold for fallback (prevents weak matches)
     HYBRID_SEARCH_ENABLED: bool = True  # Enable hybrid semantic+keyword search
     RELEVANCE_CHECK_ENABLED: bool = True  # LLM verifies context relevance before answering
     

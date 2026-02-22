@@ -581,9 +581,12 @@ def _load_gita_verses():
     _gita_verses = data.get("verses", [])
 
 
-def search_gita(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+def search_gita(query: str, top_k: int = 3, threshold: float = None) -> List[Dict[str, Any]]:
     """Search Bhagavad Gita for relevant verses (thread-safe)."""
     global _gita_index, _gita_verses
+    
+    if threshold is None:
+        threshold = settings.GITA_FALLBACK_THRESHOLD
     
     with _gita_lock:
         load_gita()
@@ -604,8 +607,7 @@ def search_gita(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
                 continue
             
             score = float(scores[0][i])
-            # Use a higher threshold for Gita to prevent false matches
-            if score < settings.GITA_SIMILARITY_THRESHOLD:
+            if score < threshold:
                 continue
             
             verse = _gita_verses[idx]
