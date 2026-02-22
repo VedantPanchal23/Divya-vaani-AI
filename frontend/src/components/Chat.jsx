@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useRef, useCallback } from 'react';
-import { sendMessage, getChatHistory, clearChatHistoryApi } from '../api';
+import { sendMessage, sendMessageStream, getChatHistory, clearChatHistoryApi } from '../api';
 import { Icons } from './Icons';
 import TextToSpeech from './TextToSpeech';
 import { useAuth } from './AuthContext';
@@ -366,38 +366,74 @@ function Chat({ sessionId, onNewMessage }) {
             content: input.trim(),
         };
 
-        setMessages(prev => [...prev, userMessage]);
+        // Create a placeholder assistant message for streaming
+        const assistantId = crypto.randomUUID();
+        const assistantMessage = {
+            id: assistantId,
+            role: 'assistant',
+            content: '',
+            source: null,
+            sourceRef: '',
+            audioUrl: '',
+            isStreaming: true,
+        };
+
+        setMessages(prev => [...prev, userMessage, assistantMessage]);
         setInput('');
         setIsLoading(true);
 
         try {
-            // Auto-detect language based on input text
             let lang = outputLanguage;
             if (outputLanguage === 'auto') {
-                // Detect if input has Hindi characters
                 lang = detectHindi(userMessage.content) ? 'hi' : 'en';
             }
-            const response = await sendMessage(userMessage.content, sessionId, lang);
 
-            const assistantMessage = {
-                id: crypto.randomUUID(),
-                role: 'assistant',
-                content: response.answer,
-                source: response.source_type,
-                sourceRef: response.source_reference,
-                audioUrl: response.audio_url,
-            };
-
-            setMessages(prev => [...prev, assistantMessage]);
-            onNewMessage?.();
+            await sendMessageStream(userMessage.content, sessionId, lang, {
+                onMeta: (data) => {
+                    setMessages(prev => prev.map(m =>
+                        m.id === assistantId
+                            ? { ...m, source: data.source_type, sourceRef: data.source_reference }
+                            : m
+                    ));
+                },
+                onChunk: (text) => {
+                    setMessages(prev => prev.map(m =>
+                        m.id === assistantId
+                            ? { ...m, content: m.content + text }
+                            : m
+                    ));
+                },
+                onDone: () => {
+                    setMessages(prev => prev.map(m =>
+                        m.id === assistantId
+                            ? { ...m, isStreaming: false }
+                            : m
+                    ));
+                    onNewMessage?.();
+                },
+                onError: (err) => {
+                    setMessages(prev => prev.map(m =>
+                        m.id === assistantId
+                            ? { ...m, content: `Sorry, I couldn't process your question. ${err.message}`, isError: true, isStreaming: false }
+                            : m
+                    ));
+                },
+            });
         } catch (err) {
-            const errorMessage = {
-                id: crypto.randomUUID(),
-                role: 'assistant',
-                content: `Sorry, I couldn't process your question. ${err.message}`,
-                isError: true,
-            };
-            setMessages(prev => [...prev, errorMessage]);
+            // If streaming failed entirely (network error before any data), update the message
+            setMessages(prev => {
+                const last = prev.find(m => m.id === assistantId);
+                if (last && !last.content) {
+                    return prev.map(m =>
+                        m.id === assistantId
+                            ? { ...m, content: `Sorry, I couldn't process your question. ${err.message}`, isError: true, isStreaming: false }
+                            : m
+                    );
+                }
+                return prev.map(m =>
+                    m.id === assistantId ? { ...m, isStreaming: false } : m
+                );
+            });
         } finally {
             setIsLoading(false);
         }
@@ -516,12 +552,20 @@ function Chat({ sessionId, onNewMessage }) {
                             key={msg.id}
                             className={`chat-message ${msg.role} ${detectHindi(msg.content) ? 'hindi' : ''}`}
                         >
-                            <p style={{ fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : undefined }}>
-                                {msg.content}
-                            </p>
+                            {msg.isStreaming && !msg.content ? (
+                                <div className="chat-loading">
+                                    <Icons.Loading size={18} className="animate-spin" />
+                                    <span>Thinking...</span>
+                                </div>
+                            ) : (
+                                <p style={{ fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : undefined }}>
+                                    {msg.content}
+                                    {msg.isStreaming && <span className="streaming-cursor">▊</span>}
+                                </p>
+                            )}
 
                             {/* Source badge — text only, no emojis */}
-                            {msg.role === 'assistant' && msg.source && getSourceLabel(msg.source) && (
+                            {msg.role === 'assistant' && msg.source && getSourceLabel(msg.source) && !msg.isStreaming && (
                                 <div className={`chat-source-badge ${getSourceClass(msg.source)}`}>
                                     <span className="source-label">{getSourceLabel(msg.source)}</span>
                                     {msg.sourceRef && (
@@ -530,7 +574,7 @@ function Chat({ sessionId, onNewMessage }) {
                                 </div>
                             )}
 
-                            {msg.role === 'assistant' && !msg.isError && (
+                            {msg.role === 'assistant' && !msg.isError && !msg.isStreaming && (
                                 <div className="chat-msg-tts">
                                     <TextToSpeech
                                         text={msg.content}
@@ -543,14 +587,6 @@ function Chat({ sessionId, onNewMessage }) {
                     ))
                 )}
 
-                {isLoading && (
-                    <div className="chat-message assistant">
-                        <div className="chat-loading">
-                            <Icons.Loading size={18} className="animate-spin" />
-                            <span>Thinking...</span>
-                        </div>
-                    </div>
-                )}
 
                 <div ref={messagesEndRef} />
             </div>

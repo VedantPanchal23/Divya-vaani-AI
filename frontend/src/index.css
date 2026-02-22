@@ -1146,6 +1146,19 @@ a:hover { color: var(--color-accent-hover); }
   font-size: 0.85rem;
 }
 
+/* Streaming cursor */
+.streaming-cursor {
+  display: inline;
+  color: var(--color-accent);
+  animation: blink-cursor 0.8s step-end infinite;
+  font-weight: 700;
+  margin-left: 1px;
+}
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
 /* Mic error */
 .chat-mic-error {
   padding: 6px 12px;

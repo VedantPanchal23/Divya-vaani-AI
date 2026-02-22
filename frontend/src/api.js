@@ -150,6 +150,77 @@ export async function sendMessage(question, transcriptId = null, language = 'hi'
 }
 
 /**
+ * Send a chat message with SSE streaming — answers appear word by word
+ * @param {string} question
+ * @param {string} transcriptId
+ * @param {string} language
+ * @param {object} callbacks - { onMeta, onChunk, onDone, onError }
+ */
+export async function sendMessageStream(question, transcriptId = null, language = 'hi', callbacks = {}) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 180_000);
+
+    try {
+        const response = await fetch(`${API_BASE}/chat/stream`, {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                question,
+                transcript_id: transcriptId,
+                language
+            }),
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to get answer');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Parse SSE lines from buffer
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.type === 'meta' && callbacks.onMeta) {
+                            callbacks.onMeta(data);
+                        } else if (data.type === 'chunk' && callbacks.onChunk) {
+                            callbacks.onChunk(data.text);
+                        } else if (data.type === 'done' && callbacks.onDone) {
+                            callbacks.onDone();
+                        }
+                    } catch {
+                        // Skip malformed SSE lines
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            callbacks.onError?.(new Error('The request took too long. Please try again.'));
+        } else {
+            callbacks.onError?.(err);
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+/**
  * Transcribe voice input
  * @param {Blob} audioBlob - Audio blob from recording
  */
