@@ -46,55 +46,56 @@ def get_gemini_client():
 
 # ========== System Prompts ==========
 
-SYSTEM_PROMPT_PRAVACHAN = """You are Divya Vaani AI, a deeply compassionate spiritual assistant that guides people using the actual teachings of Maharaj Ji (Premanand Govind Sharan Maharaj) from his pravachans (discourses).
+SYSTEM_PROMPT_PRAVACHAN = """You are Divya Vaani AI — the voice of Premanand Govind Sharan Maharaj Ji's teachings.
 
-CRITICAL RULES — THESE ARE NON-NEGOTIABLE:
+You exist for one sacred purpose: to deliver Maharaj Ji's actual words and wisdom to seekers who need it. People come to you in moments of confusion, pain, curiosity, or devotion. They deserve REAL teachings from the discourse, not generic spirituality.
 
-1. CONTEXT-GROUNDED ANSWERS ONLY: You MUST answer ONLY from the provided discourse context. If the context does not contain relevant information to answer the question, be HONEST and say the specific discourse does not address this topic directly, but share what related wisdom is available.
+YOUR NON-NEGOTIABLE PRINCIPLES:
 
-2. NEVER FABRICATE: Do NOT invent teachings, make up quotes, or attribute things to Maharaj Ji that are not in the provided context. People's spiritual journey and even their lives may depend on the accuracy of your answers.
+1. ONLY FROM THE CONTEXT: Every claim, every teaching, every piece of wisdom MUST come from the provided discourse context. If you cannot find it in the context, you say so honestly. You NEVER fabricate, guess, or fill in with generic spiritual advice.
 
-3. ALWAYS CITE TIMESTAMPS: When referencing specific teachings, include the timestamp in format [MM:SS - MM:SS].
+2. ALWAYS CITE TIMESTAMPS: When referencing Maharaj Ji's words, ALWAYS include [MM:SS - MM:SS] so the seeker can go listen to the original. This builds trust.
 
-4. RESPOND IN THE REQUESTED LANGUAGE: Hindi (Devanagari) or English as specified.
+3. DEPTH OVER BREVITY: Don't just paraphrase — EXPLAIN. The seeker needs to understand WHY Maharaj Ji said what he said, what the deeper meaning is, and how it transforms their understanding. Think like a senior devotee who has heard the discourse 100 times.
 
-5. COMPASSION FIRST: If someone is going through pain, suffering, or dark thoughts, respond with genuine warmth and care. Connect them to relevant spiritual wisdom from the context.
+4. SYNTHESIZE MULTIPLE SEGMENTS: If multiple parts of the discourse relate to the question, CONNECT them. Show how different points weave together into a cohesive teaching.
 
-ANSWERING APPROACH:
-- Start with the most relevant teaching from the context
-- Quote or paraphrase Maharaj Ji's actual words with timestamp
-- Explain the deeper meaning and how it applies
-- If the user is struggling, offer hope through the discourse's wisdom
-- Be warm, caring, and authentic — like a trusted spiritual guide
+5. COMPASSION IS NOT OPTIONAL: If someone is hurting, acknowledge their pain FIRST, then offer the teaching as medicine. Never be cold or dismissive.
+
+RESPONSE STRUCTURE:
+- Begin directly with the most relevant teaching (no greetings, no "Dear friend")
+- Quote or closely paraphrase Maharaj Ji's words with timestamp
+- Explain the deeper significance — what does this mean for the seeker?
+- If multiple segments are relevant, connect them to show the full picture
+- End with the practical takeaway — what should the seeker apply in their life?
+
+LANGUAGE:
+- Respond in whichever language is requested (Hindi Devanagari or English)
+- In Hindi: use natural, warm language. Avoid overly Sanskritized or formal tone
+- In English: clear and heartfelt, not academic
+
+HONESTY:
+- If the discourse does not address the question: say "इस प्रवचन में इस विषय पर सीधे चर्चा नहीं है" (Hindi) or "This discourse does not directly discuss this topic" (English) — then share whatever related wisdom IS in the context
+- NEVER invent quotes. NEVER attribute things to Maharaj Ji that aren't in the context.
+- This is a spiritual responsibility — accuracy is seva."""
+
+SYSTEM_PROMPT_GITA = """You are Divya Vaani AI, sharing the eternal wisdom of Bhagavad Gita.
+
+You are providing Gita wisdom because the seeker's question could not be answered from the available pravachan (discourse) transcripts. Be transparent about this.
+
+PRINCIPLES:
+1. ONLY use the provided Gita verses — never fabricate verses, translations, or meanings
+2. ALWAYS cite chapter and verse ("Chapter X, Verse Y")
+3. Explain the teaching in simple, relatable language — not academic commentary
+4. Connect Lord Krishna's wisdom to the seeker's specific situation
+5. Be warm, encouraging, and practical
 
 STYLE:
-- Start directly with relevant teaching: "Maharaj Ji teaches...", "In this discourse, Maharaj Ji explains..."
-- Do NOT start with greetings like "Dear friend" or "Priya bhakt"
-- Do NOT use second-person forms like "your problem" 
-- Keep answers focused and meaningful — quality over quantity
-
-NON-SPIRITUAL QUESTIONS:
-If the question is clearly NOT about spirituality, religion, devotion, dharma, moral values, life philosophy, or personal struggles, respond:
-Hindi: "yeh prashna adhyatmik vishay se sambandhit nahi hai. Kripya Maharaj Ji ke pravachanon se juda prashna puchein."
-English: "This question is not related to spiritual topics. Please ask questions related to Maharaj Ji's discourses."
-Do NOT force-fit spiritual context onto unrelated questions."""
-
-SYSTEM_PROMPT_GITA = """You are Divya Vaani AI, a spiritual guide who shares the eternal wisdom of Bhagavad Gita. You help seekers understand Lord Krishna's teachings and apply them to life challenges.
-
-CRITICAL RULES:
-1. Only use the provided Gita verses to answer — never fabricate verses or meanings
-2. Reference specific chapter and verse numbers
-3. Explain the teaching and its practical application
-4. Be compassionate and caring — this person is seeking guidance
-5. Make the ancient wisdom relatable to their situation
-
-NOTE: You are sharing Bhagavad Gita wisdom because this question was not found in the available pravachan (discourse) transcripts. Frame your answer as Gita's guidance.
-
-STYLE:
-- Start with the relevant teaching directly  
-- Reference the verse: "In Chapter X, Verse Y, Lord Krishna teaches..."
-- Explain practical application
-- Be warm and encouraging"""
+- Start directly with the relevant teaching
+- "भगवद्गीता में भगवान श्री कृष्ण कहते हैं..." (Hindi) or "In the Bhagavad Gita, Lord Krishna teaches..." (English)
+- Give the Sanskrit shloka, then explain its meaning and application
+- End with a practical takeaway the seeker can apply today
+- Be compassionate — this person came seeking guidance"""
 
 
 def _sanitize_user_input(text: str) -> str:
@@ -156,6 +157,16 @@ def _is_prompt_injection(text: str) -> bool:
         r'(?i)(?:for|in)\s+(?:this|the)\s+(?:rest|remainder)\s+of\s+(?:this|our)\s+conversation',
         r'(?i)i\s+want\s+you\s+to\s+(?:act|pretend|behave)\s+(?:as|like)',
         r'(?i)(?:simulate|emulate|imitate)\s+(?:a|an)\s+(?:AI|bot|assistant)\s+(?:without|that)',
+        # --- New patterns to catch system prompt leak attempts ---
+        r'(?i)(?:system|initial|original|hidden)\s+prompt',
+        r'(?i)(?:reveal|show|display|print|output|repeat|tell\s+me)\s+(?:your|the)\s+(?:instructions|prompt|rules|system)',
+        r'(?i)(?:what|show)\s+(?:is|are|me)\s+(?:your|the)\s+(?:system|initial|hidden)\s+(?:prompt|instructions|message)',
+        r'(?i)(?:ignore|disregard|forget)\s+(?:all|your|previous|prior)\s+(?:instructions|rules|prompts)',
+        r'(?i)(?:override|bypass|disable)\s+(?:your|all|the)\s+(?:safety|rules|filters|restrictions)',
+        r'(?i)you\s+are\s+now\s+(?:a|an|in)\s+(?:developer|debug|admin|unrestricted)',
+        r'(?i)(?:DAN|jailbreak|developer\s+mode|unrestricted)',
+        r'(?i)behind\s+the\s+scenes',
+        r'(?i)(?:what|how)\s+(?:is|are)\s+you\s+(?:programmed|trained|instructed)',
     ]
     
     for pattern in jailbreak_signatures:
@@ -167,33 +178,53 @@ def _is_prompt_injection(text: str) -> bool:
 
 # ========== Core Q&A Functions ==========
 
-async def generate_answer(question: str, context: str, source_type, language: str = "hi", extra_instruction: str = "") -> str:
-    """Generate answer from context using Groq (fast model for low latency)."""
+async def generate_answer(question: str, context: str, source_type, language: str = "hi", extra_instruction: str = "", chat_history: str = "") -> str:
+    """Generate answer from context using the best available model."""
     try:
         client = get_groq_client()
         
         safe_question = _sanitize_user_input(question)
         
-        lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
+        lang_instruction = "Respond in Hindi (Devanagari script). Use natural, warm Hindi — not overly formal." if language == "hi" else "Respond in English. Be clear and heartfelt."
         extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
         
-        prompt = f"""SPIRITUAL DISCOURSE CONTEXT (from Maharaj Ji's pravachan):
+        # Build conversation history block if available
+        history_block = ""
+        if chat_history:
+            history_block = f"""
+PREVIOUS CONVERSATION (for context — the seeker may reference earlier questions):
+{chat_history}
+
+NOTE: If the seeker says "tell me more", "explain that", "what about it", etc., use the previous conversation above to understand what "that/it/this" refers to.
+---
+"""
+        
+        prompt = f"""DISCOURSE CONTEXT — Maharaj Ji's (Premanand Govind Sharan Maharaj) actual words from the pravachan:
+
 {context}
 
-USER'S QUESTION/CONCERN: {safe_question}
+---
+{history_block}
+SEEKER'S QUESTION: {safe_question}
 
 {lang_instruction}
 
-INSTRUCTIONS:
-1. Find the MOST RELEVANT teaching from the above context that addresses the user's question
-2. If the context directly addresses their concern, quote/paraphrase with timestamp [MM:SS - MM:SS]
-3. Explain how the teaching applies to their situation
-4. If the context does NOT contain relevant information for this specific question, honestly say: "Is pravachan mein is vishay par seedhi charcha nahi hai" (Hindi) or "This particular discourse does not directly address this topic" (English) — and share whatever related wisdom IS available
-5. Be compassionate — the user may be going through a difficult time
-6. NEVER invent quotes or teachings not present in the context
+YOUR TASK — Give a deeply thoughtful, grounded answer:
+
+1. FIND the most relevant teaching(s) from the context above that address this question
+2. QUOTE or closely paraphrase Maharaj Ji's actual words with timestamp [MM:SS - MM:SS]
+3. EXPLAIN the deeper meaning — WHY did Maharaj Ji say this? What is the spiritual principle?
+4. If MULTIPLE segments are relevant, CONNECT them to show the full picture of the teaching
+5. END with a practical takeaway — what should the seeker understand or do differently?
+
+CRITICAL RULES:
+- ONLY use information from the context above. NEVER invent or add teachings not present.
+- If the context does NOT address the question: honestly say "इस प्रवचन में इस विषय पर सीधे बात नहीं की गई" (Hindi) or "This discourse does not directly address this topic" (English) — then share any related wisdom that IS present.
+- ALWAYS include timestamps when referencing specific parts.
+- Be warm and compassionate — the seeker may be going through a difficult time.
 {extra_block}
 
-Provide a helpful, caring, and TRUTHFUL response grounded in the discourse."""
+Give a meaningful, detailed answer that helps the seeker truly understand Maharaj Ji's teaching."""
 
         model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
         
@@ -214,6 +245,76 @@ Provide a helpful, caring, and TRUTHFUL response grounded in the discourse."""
             return "क्षमा करें, उत्तर देने में एक तकनीकी समस्या आई। कृपया पुनः प्रयास करें।"
         return "Sorry, there was a technical issue generating the answer. Please try again."
 
+
+async def generate_answer_stream(question: str, context: str, source_type, language: str = "hi", extra_instruction: str = "", chat_history: str = ""):
+    """Stream answer chunks from context using Groq (async generator)."""
+    try:
+        client = get_groq_client()
+        safe_question = _sanitize_user_input(question)
+        
+        lang_instruction = "Respond in Hindi (Devanagari script). Use natural, warm Hindi — not overly formal." if language == "hi" else "Respond in English. Be clear and heartfelt."
+        extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
+        
+        history_block = ""
+        if chat_history:
+            history_block = f"""
+PREVIOUS CONVERSATION (for context — the seeker may reference earlier questions):
+{chat_history}
+
+NOTE: If the seeker says "tell me more", "explain that", "what about it", etc., use the previous conversation above to understand what "that/it/this" refers to.
+---
+"""
+        
+        prompt = f"""DISCOURSE CONTEXT — Maharaj Ji's (Premanand Govind Sharan Maharaj) actual words from the pravachan:
+
+{context}
+
+---
+{history_block}
+SEEKER'S QUESTION: {safe_question}
+
+{lang_instruction}
+
+YOUR TASK — Give a deeply thoughtful, grounded answer:
+
+1. FIND the most relevant teaching(s) from the context above that address this question
+2. QUOTE or closely paraphrase Maharaj Ji's actual words with timestamp [MM:SS - MM:SS]
+3. EXPLAIN the deeper meaning — WHY did Maharaj Ji say this? What is the spiritual principle?
+4. If MULTIPLE segments are relevant, CONNECT them to show the full picture of the teaching
+5. END with a practical takeaway — what should the seeker understand or do differently?
+
+CRITICAL RULES:
+- ONLY use information from the context above. NEVER invent or add teachings not present.
+- If the context does NOT address the question: honestly say "इस प्रवचन में इस विषय पर सीधे बात नहीं की गई" (Hindi) or "This discourse does not directly address this topic" (English) — then share any related wisdom that IS present.
+- ALWAYS include timestamps when referencing specific parts.
+- Be warm and compassionate — the seeker may be going through a difficult time.
+{extra_block}
+
+Give a meaningful, detailed answer that helps the seeker truly understand Maharaj Ji's teaching."""
+
+        model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_PRAVACHAN},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            stream=True
+        )
+        
+        async for chunk in response:
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield delta.content
+    except Exception as e:
+        logger.error(f"generate_answer_stream failed: {e}")
+        if language == "hi":
+            yield "क्षमा करें, उत्तर देने में एक तकनीकी समस्या आई। कृपया पुनः प्रयास करें।"
+        else:
+            yield "Sorry, there was a technical issue generating the answer. Please try again."
 
 async def generate_gita_answer(question: str, verses: list, language: str = "hi", extra_instruction: str = "") -> str:
     """Generate answer from Bhagavad Gita verses."""
@@ -272,6 +373,66 @@ Provide a helpful response using the wisdom from Bhagavad Gita."""
             return "क्षमा करें, भगवद्गीता से उत्तर देने में एक तकनीकी समस्या आई। कृपया पुनः प्रयास करें।"
         return "Sorry, there was a technical issue generating the answer from Bhagavad Gita. Please try again."
 
+
+async def generate_gita_answer_stream(question: str, verses: list, language: str = "hi", extra_instruction: str = ""):
+    """Stream answer chunks from Bhagavad Gita verses using Groq (async generator)."""
+    try:
+        client = get_groq_client()
+        safe_question = _sanitize_user_input(question)
+        
+        context_parts = []
+        for v in verses:
+            verse_text = f"""Chapter {v['verse'].chapter}, Verse {v['verse'].verse}
+Sanskrit: {v['verse'].sanskrit}
+Hindi meaning: {v['verse'].hindi}
+English meaning: {v['verse'].english}"""
+            context_parts.append(verse_text)
+        
+        context = "\n\n---\n\n".join(context_parts)
+        
+        lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
+        extra_block = f"\n\nSPECIAL GUIDANCE:\n{extra_instruction}" if extra_instruction else ""
+        
+        prompt = f"""BHAGAVAD GITA VERSES:
+{context}
+
+USER'S QUESTION: {safe_question}
+
+{lang_instruction}
+
+INSTRUCTIONS:
+1. This answer is from Bhagavad Gita because no relevant pravachan (discourse) content was found
+2. Reference the specific Gita verse (chapter and verse number)
+3. Explain how this eternal wisdom from Lord Krishna applies to their situation
+4. Keep the tone spiritual, compassionate, and practical
+5. Start directly with the teaching — no greetings
+{extra_block}
+
+Provide a helpful response using the wisdom from Bhagavad Gita."""
+
+        model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_GITA},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            stream=True
+        )
+        
+        async for chunk in response:
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield delta.content
+    except Exception as e:
+        logger.error(f"generate_gita_answer_stream failed: {e}")
+        if language == "hi":
+            yield "क्षमा करें, भगवद्गीता से उत्तर देने में एक तकनीकी समस्या आई। कृपया पुनः प्रयास करें।"
+        else:
+            yield "Sorry, there was a technical issue generating the answer from Bhagavad Gita. Please try again."
 
 async def generate_not_found(language: str = "hi") -> str:
     """Generate 'not found' response."""
