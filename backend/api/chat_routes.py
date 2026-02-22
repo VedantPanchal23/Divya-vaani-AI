@@ -1,5 +1,4 @@
-"""
-Chat / Q&A Routes — Production-Grade RAG-Powered Spiritual Q&A.
+"""Chat / Q&A Routes — Production-Grade RAG-Powered Spiritual Q&A.
 
 Decision flow:
 1. Greetings → fixed response
@@ -11,8 +10,13 @@ Decision flow:
 7. Gita ONLY as explicit fallback (user asks about Gita, OR zero transcript hits)
 """
 import logging
+import hashlib
+import json as _json
+import time as _time
+from collections import OrderedDict
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -28,6 +32,45 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_QUESTION_LENGTH = 1000
+
+
+# ========== Answer Cache ==========
+
+class _AnswerCache:
+    """Simple LRU cache with TTL for Q&A answers."""
+    def __init__(self, maxsize: int = 200, ttl_seconds: int = 3600):
+        self._cache: OrderedDict = OrderedDict()
+        self._maxsize = maxsize
+        self._ttl = ttl_seconds
+    
+    def _make_key(self, question: str, content_id: str, language: str) -> str:
+        normalized = question.strip().lower()
+        raw = f"{normalized}|{content_id or ''}|{language}"
+        return hashlib.md5(raw.encode('utf-8')).hexdigest()
+    
+    def get(self, question: str, content_id: str, language: str) -> Optional[ChatResponse]:
+        key = self._make_key(question, content_id, language)
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        ts, response = entry
+        if _time.time() - ts > self._ttl:
+            del self._cache[key]
+            return None
+        # Move to end (most recently used)
+        self._cache.move_to_end(key)
+        logger.info(f"[Q&A] ⚡ Cache HIT for: '{question[:40]}...'")
+        return response
+    
+    def put(self, question: str, content_id: str, language: str, response: ChatResponse):
+        key = self._make_key(question, content_id, language)
+        self._cache[key] = (_time.time(), response)
+        self._cache.move_to_end(key)
+        # Evict oldest if over capacity
+        while len(self._cache) > self._maxsize:
+            self._cache.popitem(last=False)
+
+_answer_cache = _AnswerCache(maxsize=200, ttl_seconds=3600)
 
 
 # ========== Helper Functions ==========
@@ -444,6 +487,12 @@ async def chat(
     # Compassion instruction for distressed users
     extra_instruction = sensitivity if sensitivity and sensitivity != "OFF_TOPIC" else ""
 
+    # ── Step 3b: Check answer cache BEFORE any expensive operations ──
+    cached_response = _answer_cache.get(question, content_id, language)
+    if cached_response is not None:
+        await _persist_chat(db, user, content_id, question, cached_response)
+        return cached_response
+
     # ── Step 4: Prepare search queries ──
     is_english = llm_engine.is_english_text(question)
     search_query = question
@@ -547,6 +596,21 @@ async def chat(
         if transcript_results:
             best_transcript_score = transcript_results[0].get("score", 0)
 
+    # ── Step 6d: Fetch conversation history for follow-up context ──
+    chat_history = ""
+    try:
+        if user and content_id:
+            recent_messages = await crud.get_chat_history(db, user.id, content_id, limit=4)
+            if recent_messages:
+                history_parts = []
+                for msg in recent_messages[-4:]:
+                    role_label = "Seeker" if msg.role == "user" else "Divya Vaani AI"
+                    history_parts.append(f"{role_label}: {msg.content[:300]}")
+                chat_history = "\n".join(history_parts)
+                logger.info(f"[Q&A] Including {len(recent_messages[-4:])} messages of conversation context")
+    except Exception as e:
+        logger.warning(f"Failed to fetch chat history: {e}")
+
     # ── Step 7: Determine source and generate answer ──
     
     # Log decision info
@@ -566,10 +630,15 @@ async def chat(
             context_parts.append(f"{timestamp}: {c.text}")
         context = "\n\n".join(context_parts)
 
-        # ── Step 7a: LLM Relevance Verification (critical guardrail) ──
+        # ── Step 7a: LLM Relevance Verification (guardrail, but NOT trigger-happy) ──
+        #
+        # Philosophy: It's BETTER to answer from the transcript (even if imperfect)
+        # than to silently switch to Gita. The LLM prompt already handles "not directly
+        # relevant" context gracefully. Only reject when we're VERY sure it's garbage.
+        #
         context_is_relevant = True
         
-        if settings.RELEVANCE_CHECK_ENABLED and best_transcript_score < 0.70:
+        if settings.RELEVANCE_CHECK_ENABLED and best_transcript_score < 0.55:
             try:
                 relevance = await llm_engine.verify_context_relevance(question, context, language)
                 context_is_relevant = relevance.get("relevant", True)
@@ -580,13 +649,27 @@ async def chat(
                     f"confidence={relevance_confidence:.2f}, reason={relevance.get('reason', '')[:60]}"
                 )
                 
-                # If low confidence AND low semantic score, don't use this context
-                if not context_is_relevant and relevance_confidence >= 0.75:
-                    logger.info("[Q&A] Context rejected by relevance check — will try Gita or not-found")
-                    transcript_results = []  # Clear so we fall through
-                elif not context_is_relevant and best_transcript_score < 0.50:
-                    logger.info("[Q&A] Context weakly relevant with low score — rejecting")
+                # Only reject when ALL of these are true:
+                # 1. LLM says it's NOT relevant
+                # 2. LLM is VERY confident about that (>= 0.85)
+                # 3. Semantic score is genuinely low (< 0.40)
+                # 4. User is NOT on a specific video page (if they are, let the answer prompt handle it)
+                should_reject = (
+                    not context_is_relevant
+                    and relevance_confidence >= 0.85
+                    and best_transcript_score < 0.40
+                    and not content_id  # When user is on a video, ALWAYS try transcript answer
+                )
+                
+                if should_reject:
+                    logger.info("[Q&A] Context rejected — high confidence irrelevant + low score + no content_id")
                     transcript_results = []
+                elif not context_is_relevant:
+                    logger.info(
+                        f"[Q&A] Context marked irrelevant but KEEPING it: "
+                        f"confidence={relevance_confidence:.2f}, score={best_transcript_score:.3f}, "
+                        f"content_id={'yes' if content_id else 'no'} — letting answer prompt handle it"
+                    )
                     
             except Exception as e:
                 logger.warning(f"Relevance check failed (allowing): {e}")
@@ -600,9 +683,12 @@ async def chat(
             context_parts.append(f"{timestamp}: {c.text}")
         context = "\n\n".join(context_parts)
         
+        logger.info(f"[Q&A] ✅ Answering from TRANSCRIPT ({len(chunks)} segments, best_score={best_transcript_score:.3f})")
+        
         answer = await llm_engine.generate_answer(
             question, context, SourceType.PRAVACHAN, language,
-            extra_instruction=extra_instruction
+            extra_instruction=extra_instruction,
+            chat_history=chat_history
         )
         
         source_ref = f"Based on {len(chunks)} segments from the discourse (relevance: {best_transcript_score:.0%})"
@@ -613,10 +699,16 @@ async def chat(
             source_reference=source_ref,
             audio_url=""
         )
+        _answer_cache.put(question, content_id, language, response)
         await _persist_chat(db, user, content_id, question, response)
         return response
 
-    # ── Step 8: GITA FALLBACK — only when transcripts gave nothing ──
+    # ── Step 8: GITA FALLBACK — but ONLY when appropriate ──
+    #
+    # Key principle: If the user is on a specific video page (content_id is set),
+    # they expect answers FROM THAT VIDEO. Don't confuse them with Gita.
+    # Instead, give an honest "not found in this discourse" response.
+    #
     gita_results = []
     
     use_gita_fallback = _should_use_gita_fallback(
@@ -625,7 +717,9 @@ async def chat(
         content_id=content_id,
     )
     if use_gita_fallback:
-        gita_results = rag_engine.search_gita(search_query, top_k=3)
+        logger.info(f"[Q&A] Using Gita fallback (is_gita_q={is_gita_question}, content_id={content_id})")
+        gita_threshold = settings.GITA_EXPLICIT_THRESHOLD if is_gita_question else settings.GITA_FALLBACK_THRESHOLD
+        gita_results = rag_engine.search_gita(search_query, top_k=3, threshold=gita_threshold)
         
         if gita_results:
             best_gita_score = gita_results[0]["score"]
@@ -645,12 +739,28 @@ async def chat(
                 source_reference=source_ref,
                 audio_url=""
             )
+            _answer_cache.put(question, content_id, language, response)
             await _persist_chat(db, user, content_id, question, response)
             return response
 
     # ── Step 9: Nothing found ──
-    logger.info(f"[Q&A] No relevant content found for: '{question[:60]}...'")
-    not_found = await llm_engine.generate_not_found(language)
+    # If user is on a specific video, give a video-specific "not found" message
+    if content_id:
+        logger.info(f"[Q&A] No relevant content for video {content_id}: '{question[:60]}...'")
+        if language == "hi":
+            not_found = (
+                "इस प्रवचन में इस विषय पर सीधे चर्चा नहीं मिली। "
+                "कृपया इस प्रवचन से संबंधित कोई अन्य प्रश्न पूछें, या अपना प्रश्न दूसरे शब्दों में पूछकर देखें।"
+            )
+        else:
+            not_found = (
+                "I couldn't find information about this topic in the current discourse. "
+                "Please try asking another question about this discourse, or rephrase your question."
+            )
+    else:
+        logger.info(f"[Q&A] No relevant content found for: '{question[:60]}...'")
+        not_found = await llm_engine.generate_not_found(language)
+    
     response = ChatResponse(
         answer=not_found,
         source_type=SourceType.NOT_FOUND,
@@ -685,3 +795,199 @@ async def _persist_chat(
         )
     except Exception as e:
         logger.warning(f"Failed to persist chat: {e}")
+
+
+# ========== SSE Streaming Chat Endpoint ==========
+
+def _sse_event(data: dict) -> str:
+    """Format a dict as an SSE data line."""
+    return f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/chat/stream")
+@limiter.limit("15/minute")
+async def chat_stream(
+    request: Request,
+    chat_request: ChatRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE streaming version of /chat — streams LLM answer tokens in real time."""
+    question = (chat_request.question or "").strip()
+    language = chat_request.language or "hi"
+    content_id = chat_request.transcript_id
+
+    # ── Validation (same as /chat) ──
+    if not question:
+        raise HTTPException(400, "Question is required.")
+    if len(question) > MAX_QUESTION_LENGTH:
+        raise HTTPException(400, f"Question too long (max {MAX_QUESTION_LENGTH} chars).")
+
+    # ── Determine answer path FIRST, then stream ──
+    # We run the full pipeline synchronously to figure out WHAT to answer,
+    # then stream just the LLM generation part.
+
+    # Prompt injection check
+    if llm_engine._is_prompt_injection(question):
+        async def _stream_blocked():
+            msg = ("यह प्रश्न मेरे विषय से बाहर है। मैं महाराज जी के प्रवचनों और भगवद्गीता से आध्यात्मिक मार्गदर्शन में सहायता कर सकता हूं।"
+                   if language == "hi" else
+                   "This question is outside my area of expertise. I can help with spiritual guidance from Maharaj Ji's discourses and the Bhagavad Gita.")
+            yield _sse_event({"type": "meta", "source_type": "not_found", "source_reference": ""})
+            yield _sse_event({"type": "chunk", "text": msg})
+            yield _sse_event({"type": "done"})
+        return StreamingResponse(_stream_blocked(), media_type="text/event-stream")
+
+    # Greeting check
+    q_lower = question.lower().strip()
+    greetings = ["radhe radhe", "radhey radhey", "ram ram", "jai shree krishna",
+                 "jai gurudev", "pranam", "namaste", "hello", "hi", "hare krishna"]
+    if any(q_lower.startswith(g) for g in greetings) and len(q_lower.split()) <= 5:
+        # Greetings go through LLM — stream them
+        pass  # Fall through to the pipeline below
+
+    # Off-topic check
+    sensitivity = _detect_sensitive_topic(question)
+    if sensitivity == "OFF_TOPIC":
+        async def _stream_offtopic():
+            msg = ("यह प्रश्न मेरे विषय से बाहर है। मैं महाराज जी के प्रवचनों और भगवद्गीता से आध्यात्मिक मार्गदर्शन में सहायता कर सकता हूं। कृपया आध्यात्मिक विषय पर प्रश्न पूछें।"
+                   if language == "hi" else
+                   "This question is outside my area of expertise. I can help with spiritual guidance from Maharaj Ji's discourses and the Bhagavad Gita. Please ask a spirituality-related question.")
+            yield _sse_event({"type": "meta", "source_type": "not_found", "source_reference": ""})
+            yield _sse_event({"type": "chunk", "text": msg})
+            yield _sse_event({"type": "done"})
+        return StreamingResponse(_stream_offtopic(), media_type="text/event-stream")
+
+    extra_instruction = sensitivity if sensitivity and sensitivity != "OFF_TOPIC" else ""
+
+    # Cache check
+    cached = _answer_cache.get(question, content_id, language)
+    if cached is not None:
+        async def _stream_cached():
+            yield _sse_event({"type": "meta", "source_type": cached.source_type.value if cached.source_type else "not_found", "source_reference": cached.source_reference or ""})
+            yield _sse_event({"type": "chunk", "text": cached.answer})
+            yield _sse_event({"type": "done"})
+        return StreamingResponse(_stream_cached(), media_type="text/event-stream")
+
+    # ── Search pipeline (same as /chat) ──
+    is_english = llm_engine.is_english_text(question)
+    search_query = question
+    if is_english:
+        hindi_question = await llm_engine.translate_to_hindi(question)
+        search_query = f"{question} {hindi_question}"
+
+    expanded_query = _expand_question_for_search(search_query)
+    is_gita_question = _is_explicit_gita_question(question)
+    transcript_results = []
+    best_transcript_score = 0.0
+
+    if not is_gita_question and (content_id or rag_engine.has_transcripts()):
+        if settings.HYBRID_SEARCH_ENABLED:
+            transcript_results = rag_engine.search_transcripts_hybrid(
+                expanded_query, transcript_id=content_id, top_k=8
+            )
+        else:
+            transcript_results = rag_engine.search_transcripts(
+                expanded_query, transcript_id=content_id, top_k=8
+            )
+        transcript_results = _rerank_results(question, transcript_results)
+        if transcript_results:
+            best_transcript_score = transcript_results[0].get("score", 0)
+
+    # Conversation history
+    chat_history = ""
+    try:
+        if user and content_id:
+            recent = await crud.get_chat_history(db, user.id, content_id, limit=4)
+            if recent:
+                chat_history = "\n".join(
+                    f"{m.role}: {m.content[:200]}" for m in recent[-4:]
+                )
+    except Exception:
+        pass
+
+    # ── Relevance check (same as /chat) ──
+    if transcript_results and not is_gita_question:
+        if settings.RELEVANCE_CHECK_ENABLED and best_transcript_score < 0.55:
+            try:
+                chunks = [r["chunk"] for r in transcript_results]
+                context_parts = [f"[{_format_time(c.start_time)} - {_format_time(c.end_time)}]: {c.text}" for c in chunks]
+                context = "\n\n".join(context_parts)
+                relevance = await llm_engine.verify_context_relevance(question, context, language)
+                context_is_relevant = relevance.get("relevant", True)
+                confidence = relevance.get("confidence", 0.5)
+                should_reject = (
+                    not context_is_relevant
+                    and confidence > 0.8
+                    and best_transcript_score < 0.40
+                    and not content_id
+                )
+                if should_reject:
+                    transcript_results = []
+            except Exception:
+                pass
+
+    # ── DECISION: Stream from transcript, Gita, or not-found ──
+
+    if transcript_results and not is_gita_question:
+        chunks = [r["chunk"] for r in transcript_results]
+        context_parts = [f"[{_format_time(c.start_time)} - {_format_time(c.end_time)}]: {c.text}" for c in chunks]
+        context = "\n\n".join(context_parts)
+        source_ref = f"Based on {len(chunks)} segments from the discourse (relevance: {best_transcript_score:.0%})"
+
+        async def _stream_transcript():
+            yield _sse_event({"type": "meta", "source_type": "pravachan", "source_reference": source_ref})
+            full_answer = []
+            async for token in llm_engine.generate_answer_stream(
+                question, context, SourceType.PRAVACHAN, language,
+                extra_instruction=extra_instruction, chat_history=chat_history
+            ):
+                full_answer.append(token)
+                yield _sse_event({"type": "chunk", "text": token})
+            yield _sse_event({"type": "done"})
+            # Cache + persist after streaming completes
+            answer = "".join(full_answer)
+            resp = ChatResponse(answer=answer, source_type=SourceType.PRAVACHAN, source_reference=source_ref, audio_url="")
+            _answer_cache.put(question, content_id, language, resp)
+            await _persist_chat(db, user, content_id, question, resp)
+
+        return StreamingResponse(_stream_transcript(), media_type="text/event-stream")
+
+    # Gita fallback
+    use_gita = _should_use_gita_fallback(is_gita_question, transcript_results, content_id)
+    if use_gita:
+        gita_threshold = settings.GITA_EXPLICIT_THRESHOLD if is_gita_question else settings.GITA_FALLBACK_THRESHOLD
+        gita_results = rag_engine.search_gita(search_query, top_k=3, threshold=gita_threshold)
+        if gita_results:
+            verse_refs = [f"Chapter {v['verse'].chapter}, Verse {v['verse'].verse}" for v in gita_results]
+            source_ref = f"Bhagavad Gita - {', '.join(verse_refs)}"
+
+            async def _stream_gita():
+                yield _sse_event({"type": "meta", "source_type": "bhagavad_gita", "source_reference": source_ref})
+                full_answer = []
+                async for token in llm_engine.generate_gita_answer_stream(
+                    question, gita_results, language, extra_instruction=extra_instruction
+                ):
+                    full_answer.append(token)
+                    yield _sse_event({"type": "chunk", "text": token})
+                yield _sse_event({"type": "done"})
+                answer = "".join(full_answer)
+                resp = ChatResponse(answer=answer, source_type=SourceType.GITA, source_reference=source_ref, audio_url="")
+                _answer_cache.put(question, content_id, language, resp)
+                await _persist_chat(db, user, content_id, question, resp)
+
+            return StreamingResponse(_stream_gita(), media_type="text/event-stream")
+
+    # Not found
+    if content_id:
+        not_found = ("इस प्रवचन में इस विषय पर सीधे चर्चा नहीं मिली। कृपया इस प्रवचन से संबंधित कोई अन्य प्रश्न पूछें, या अपना प्रश्न दूसरे शब्दों में पूछकर देखें।"
+                     if language == "hi" else
+                     "I couldn't find information about this topic in the current discourse. Please try asking another question about this discourse, or rephrase your question.")
+    else:
+        not_found = await llm_engine.generate_not_found(language)
+
+    async def _stream_notfound():
+        yield _sse_event({"type": "meta", "source_type": "not_found", "source_reference": ""})
+        yield _sse_event({"type": "chunk", "text": not_found})
+        yield _sse_event({"type": "done"})
+    return StreamingResponse(_stream_notfound(), media_type="text/event-stream")
