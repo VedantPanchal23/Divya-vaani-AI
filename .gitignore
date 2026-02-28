@@ -1,50 +1,89 @@
-# Dependencies
+# ============================
+# Divya Vaani — .gitignore
+# ============================
+
+# ---------- Dependencies ----------
 node_modules/
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
 *.egg-info/
 dist/
 build/
 venv/
-# Environment
-.env
-.env.local
-.env.*.local
+.venv/
 
-# IDE
+# ---------- Environment ----------
+.env
+.env.*
+!.env.example
+
+# ---------- IDE ----------
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-*
 
-# OS
+# ---------- OS ----------
 .DS_Store
 Thumbs.db
+Desktop.ini
+ehthumbs.db
 
-# Logs
+# ---------- Logs ----------
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Next.js
+# ---------- Build artifacts ----------
 .next/
 out/
+*.tsbuildinfo
 
-# Data directories (keep structure, ignore content)
-backend/data/uploads/*
-!backend/data/uploads/.gitkeep
-backend/data/transcripts/*
-!backend/data/transcripts/.gitkeep
-backend/data/chroma_db/
+# ---------- Backup files ----------
+*.bak
+*.orig
+*.tmp
 
-# Audio files
+# ---------- Media files ----------
 *.mp3
 *.wav
 *.m4a
 *.ogg
 *.webm
 *.mp4
+*.flac
+*.aac
 
-# Keep structure
-!backend/data/bhagavad_gita.json
+# ---------- Backend data ----------
+# Uploads (user-uploaded files)
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+
+# Transcripts (generated per video)
+backend/data/transcripts/*
+!backend/data/transcripts/.gitkeep
+
+# Audio output
+backend/data/audio/*
+!backend/data/audio/.gitkeep
+
+# Thumbnails
+backend/data/thumbnails/*
+!backend/data/thumbnails/.gitkeep
+
+# FAISS index (rebuilt from transcripts)
+backend/data/index/
+
+# Old ChromaDB
+backend/data/chroma_db/
+
+# ---------- Kaggle ----------
+kaggle_upload/
+*.ipynb_checkpoints/
+
+# ---------- Misc ----------
 input/

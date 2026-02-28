@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Reference Audio Configuration
 # =============================================================================
 
-# The ONLY file to use for voice cloning (clean, 10 min, minimal background noise)
+# The designated file for voice cloning (or any WAV from kaggle_upload)
 REFERENCE_AUDIO_FILENAME = "maharaj_audio.mp3"
 
 # Global state for model caching
@@ -51,8 +51,8 @@ def clear_voice_cloning_cache():
         try:
             Path(_cached_reference_path).unlink()
             logger.info("   Deleted cached reference audio")
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not delete cached reference: {e}")
     
     _cached_reference_path = None
     _reference_audio_cache = {}
@@ -65,8 +65,8 @@ def clear_voice_cloning_cache():
 
 def get_reference_audio_path() -> Optional[Path]:
     """
-    Get the path to the designated reference audio file for voice cloning.
-    Only uses maharaj_audio.mp3 - the cleanest reference with minimal background noise.
+    Get the path to the reference audio file for voice cloning.
+    Searches multiple locations including kaggle_upload WAV files.
     """
     # Check multiple possible locations
     possible_paths = [
@@ -83,8 +83,27 @@ def get_reference_audio_path() -> Optional[Path]:
             logger.info(f"🎤 Using reference audio: {path}")
             return path
     
+    # Fallback: Use a WAV file from kaggle_upload (Maharaj Ji's voice samples)
+    kaggle_dir = Path(__file__).parent.parent.parent / "kaggle_upload"
+    if kaggle_dir.exists():
+        wav_files = sorted(kaggle_dir.glob("*.wav"))
+        if wav_files:
+            # Pick the largest file (likely the cleanest/longest sample)
+            best_file = max(wav_files, key=lambda f: f.stat().st_size)
+            logger.info(f"🎤 Using kaggle_upload reference audio: {best_file.name} ({best_file.stat().st_size / 1024:.0f}KB)")
+            return best_file
+    
+    # Also check reference_audio for any WAV/MP3 files
+    ref_dir = Path(__file__).parent.parent / "data" / "reference_audio"
+    if ref_dir.exists():
+        for ext in ["*.wav", "*.mp3", "*.flac"]:
+            files = list(ref_dir.glob(ext))
+            if files:
+                logger.info(f"🎤 Using reference audio: {files[0]}")
+                return files[0]
+    
     logger.warning(f"⚠️ Reference audio not found: {REFERENCE_AUDIO_FILENAME}")
-    logger.warning(f"   Please place the file in: Input/{REFERENCE_AUDIO_FILENAME}")
+    logger.warning(f"   Place audio in: Input/{REFERENCE_AUDIO_FILENAME} or kaggle_upload/")
     return None
 
 
@@ -272,7 +291,7 @@ async def generate_cloned_speech(
         logger.info(f"   Text length: {len(clean_text)} chars")
         
         # Run inference in thread pool with CACHED speaker embeddings
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         def _generate_with_cached_embeddings():
             """
@@ -354,7 +373,7 @@ async def _convert_wav_to_mp3(wav_path: Path, mp3_path: Path) -> bool:
     try:
         from pydub import AudioSegment
         
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         def convert():
             audio = AudioSegment.from_wav(str(wav_path))
@@ -510,8 +529,8 @@ async def generate_long_cloned_speech(
         for p in chunk_paths:
             try:
                 p.unlink()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not delete chunk file: {e}")
         
         if combined_path:
             logger.info(f"✅ Long speech generation complete: {combined_path}")
@@ -526,8 +545,8 @@ async def generate_long_cloned_speech(
         for p in chunk_paths:
             try:
                 p.unlink()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not cleanup chunk: {e}")
         return None
 
 
@@ -567,7 +586,7 @@ async def _combine_audio_chunks(chunk_paths: List[Path], output_path: Optional[P
         if not chunk_paths:
             return None
         
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         if output_path is None:
             audio_id = str(uuid.uuid4())[:8]
@@ -662,7 +681,7 @@ async def prewarm_voice_cloning():
         
         # Compute and cache speaker embeddings
         logger.info("   Computing speaker embeddings...")
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         def _compute_embeddings():
             global _cached_gpt_cond_latent, _cached_speaker_embedding

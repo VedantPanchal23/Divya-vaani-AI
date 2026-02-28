@@ -7,7 +7,8 @@ import {
     // General
     FiUpload, FiSun, FiMoon, FiTrash2, FiRefreshCw, FiPlay, FiPause, FiSquare,
     FiVolume2, FiVolumeX, FiLoader, FiAlertCircle, FiCheckCircle, FiClock,
-    FiChevronDown, FiChevronUp, FiSend, FiX, FiSettings, FiInfo,
+    FiChevronDown, FiChevronUp, FiChevronLeft, FiSend, FiX, FiSettings, FiInfo,
+    FiSearch, FiArrowLeft, FiCheck, FiPlus,
 
     // Content
     FiFileText, FiMessageCircle, FiBook, FiBookOpen, FiList, FiMic,
@@ -47,6 +48,10 @@ export const Icons = {
     Settings: (props) => <FiSettings {...props} />,
     Info: (props) => <FiInfo {...props} />,
     MoreVertical: (props) => <FiMoreVertical {...props} />,
+    Search: (props) => <FiSearch {...props} />,
+    Back: (props) => <FiArrowLeft {...props} />,
+    Check: (props) => <FiCheck {...props} />,
+    Plus: (props) => <FiPlus {...props} />,
 
     // Media
     Play: (props) => <FiPlay {...props} />,
@@ -85,6 +90,7 @@ export const Icons = {
     // Chevrons
     ChevronDown: (props) => <FiChevronDown {...props} />,
     ChevronUp: (props) => <FiChevronUp {...props} />,
+    ChevronLeft: (props) => <FiChevronLeft {...props} />,
 
     // Processing steps
     Processing: (props) => <FiLoader {...props} />,

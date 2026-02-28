@@ -1,8 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
 import { sendMessage } from '../api';
-import TextToSpeech from './TextToSpeech';
 import { Icons } from './Icons';
 import { FiMic, FiMicOff } from 'react-icons/fi';
+
+// Custom confirmation dialog (replaces browser confirm())
+function ConfirmDialog({ message, onConfirm, onCancel }) {
+    return (
+        <div className="confirm-overlay" onClick={onCancel}>
+            <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
+                <p>{message}</p>
+                <div className="confirm-actions">
+                    <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+                    <button className="btn btn-primary btn-sm" onClick={onConfirm}>Clear</button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function Chat({ sessionId, onNewMessage }) {
     const [messages, setMessages] = useState([]);
@@ -11,6 +25,7 @@ function Chat({ sessionId, onNewMessage }) {
     const [outputLanguage, setOutputLanguage] = useState('auto');
     const [isListening, setIsListening] = useState(false);
     const [speechSupported, setSpeechSupported] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
     const messagesEndRef = useRef(null);
     const recognitionRef = useRef(null);
 
@@ -141,10 +156,13 @@ function Chat({ sessionId, onNewMessage }) {
         }
     };
 
-    const handleClear = async () => {
-        if (confirm('Clear all chat history?')) {
-            setMessages([]);
-        }
+    const handleClear = () => {
+        setShowConfirm(true);
+    };
+
+    const confirmClear = () => {
+        setMessages([]);
+        setShowConfirm(false);
     };
 
     const detectHindi = (text) => {
@@ -155,20 +173,10 @@ function Chat({ sessionId, onNewMessage }) {
     return (
         <div className="chat-container">
             {/* Language Selector & Clear Button */}
-            <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 'var(--spacing-sm)',
-                gap: 'var(--spacing-sm)'
-            }}>
+            <div className="chat-toolbar">
                 <div className="language-selector">
-                    <label style={{
-                        fontSize: '0.75rem',
-                        color: 'var(--color-text-muted)',
-                        marginRight: 'var(--spacing-xs)'
-                    }}>
-                        <Icons.Globe size={12} style={{ marginRight: '4px' }} />
+                    <label className="language-label">
+                        <Icons.Globe size={12} />
                         Output:
                     </label>
                     <select
@@ -196,12 +204,10 @@ function Chat({ sessionId, onNewMessage }) {
             {/* Messages */}
             <div className="chat-messages">
                 {messages.length === 0 ? (
-                    <div className="empty-state" style={{ flex: 1 }}>
-                        <Icons.Chat size={32} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
-                        <p style={{ color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
-                            Ask anything about the speech
-                        </p>
-                        <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                    <div className="chat-empty-state">
+                        <Icons.Chat size={32} className="chat-empty-icon" />
+                        <p className="chat-empty-text">Ask anything about the speech</p>
+                        <p className="chat-empty-hint">
                             {speechSupported ? 'Type or use 🎙️ to speak your question' : 'Type your question below'}
                         </p>
                     </div>
@@ -211,42 +217,19 @@ function Chat({ sessionId, onNewMessage }) {
                             key={msg.id}
                             className={`chat-message ${msg.role} ${detectHindi(msg.content) ? 'hindi' : ''}`}
                         >
-                            <p style={{
-                                fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : 'inherit'
-                            }}>
+                            <p className={detectHindi(msg.content) ? 'hindi-text' : ''}>
                                 {msg.content}
                             </p>
 
-                            {/* Relevant quotes */}
                             {msg.quotes && msg.quotes.length > 0 && (
-                                <div style={{
-                                    marginTop: 'var(--spacing-sm)',
-                                    padding: 'var(--spacing-sm)',
-                                    background: 'var(--color-bg-tertiary)',
-                                    borderRadius: 'var(--radius-sm)',
-                                    fontSize: '0.85rem',
-                                    border: '1px solid var(--border-color)'
-                                }}>
-                                    <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <div className="chat-quotes">
+                                    <strong className="chat-quotes-label">
                                         <Icons.BookOpen size={14} />
                                         From the speech:
                                     </strong>
                                     {msg.quotes.map((quote, i) => (
-                                        <p key={i} style={{ marginTop: '0.25rem', fontStyle: 'italic' }}>
-                                            "{quote}"
-                                        </p>
+                                        <p key={i} className="chat-quote">"{quote}"</p>
                                     ))}
-                                </div>
-                            )}
-
-                            {/* TTS for assistant messages */}
-                            {msg.role === 'assistant' && !msg.isError && (
-                                <div style={{ marginTop: 'var(--spacing-sm)' }}>
-                                    <TextToSpeech
-                                        text={msg.content}
-                                        lang={detectHindi(msg.content) ? 'hi-IN' : 'en-US'}
-                                        audioUrl={msg.audioUrl}
-                                    />
                                 </div>
                             )}
                         </div>
@@ -255,7 +238,7 @@ function Chat({ sessionId, onNewMessage }) {
 
                 {isLoading && (
                     <div className="chat-message assistant">
-                        <div className="loading-text" style={{ gap: 'var(--spacing-sm)' }}>
+                        <div className="loading-text">
                             <Icons.Loading size={20} className="animate-spin" />
                             <span>Thinking...</span>
                         </div>
@@ -294,6 +277,15 @@ function Chat({ sessionId, onNewMessage }) {
                     <Icons.Send size={18} />
                 </button>
             </div>
+
+            {/* Custom Confirm Dialog */}
+            {showConfirm && (
+                <ConfirmDialog
+                    message="Clear all chat history?"
+                    onConfirm={confirmClear}
+                    onCancel={() => setShowConfirm(false)}
+                />
+            )}
         </div>
     );
 }

@@ -24,6 +24,10 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 # Max chunk duration in milliseconds (10 minutes)
 MAX_CHUNK_DURATION_MS = 10 * 60 * 1000
 
+# Parallel transcription settings
+PARALLEL_CHUNK_LIMIT = 3  # Process 3 chunks concurrently (safe for Groq rate limits)
+PARALLEL_BATCH_DELAY = 1.0  # Delay between batches to avoid rate limits
+
 
 class TranscriptChunk:
     def __init__(self, id: str, text: str, start_time: float, end_time: float):
@@ -250,24 +254,60 @@ async def transcribe_audio(file_id: str, file_path: Path, filename: str, progres
     else:
         chunk_files = [(file_path, 0.0)]
     
-    # Transcribe all chunks
+    # Transcribe all chunks IN PARALLEL for speed
     all_segments = []
     total_duration = 0.0
     
     try:
-        for i, (chunk_path, time_offset) in enumerate(chunk_files):
+        import asyncio
+        
+        # Process chunks in parallel batches
+        total_chunks = len(chunk_files)
+        logger.info(f"🚀 Processing {total_chunks} chunks in parallel (batch size: {PARALLEL_CHUNK_LIMIT})")
+        
+        # Create indexed chunk list to maintain order
+        indexed_chunks = list(enumerate(chunk_files))
+        all_results = [None] * total_chunks  # Pre-allocate to maintain order
+        
+        for batch_start in range(0, total_chunks, PARALLEL_CHUNK_LIMIT):
+            batch_end = min(batch_start + PARALLEL_CHUNK_LIMIT, total_chunks)
+            batch = indexed_chunks[batch_start:batch_end]
+            
             if progress_callback:
-                progress_callback(i, len(chunk_files), f"Transcribing chunk {i+1}/{len(chunk_files)}...")
+                progress_callback(batch_start, total_chunks, 
+                    f"Transcribing chunks {batch_start+1}-{batch_end}/{total_chunks}...")
             
-            logger.info(f"📡 Sending chunk {i+1}/{len(chunk_files)} to Groq API...")
-            segments, chunk_duration = await _transcribe_single_chunk(chunk_path, time_offset)
-            all_segments.extend(segments)
+            logger.info(f"📡 Sending batch {batch_start//PARALLEL_CHUNK_LIMIT + 1}: chunks {batch_start+1}-{batch_end}")
             
-            # Update total duration (use max end time)
+            # Create tasks for this batch
+            tasks = [
+                _transcribe_single_chunk(chunk_path, time_offset)
+                for idx, (chunk_path, time_offset) in batch
+            ]
+            
+            # Run batch in parallel
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Store results in order
+            for i, result in enumerate(batch_results):
+                original_idx = batch[i][0]  # Get original chunk index
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Chunk {original_idx + 1} failed: {result}")
+                    all_results[original_idx] = ([], 0.0)
+                else:
+                    all_results[original_idx] = result
+            
+            # Add small delay between batches to avoid rate limits
+            if batch_end < total_chunks:
+                await asyncio.sleep(PARALLEL_BATCH_DELAY)
+        
+        # Merge all segments in order
+        for segments, chunk_duration in all_results:
             if segments:
+                all_segments.extend(segments)
                 total_duration = max(total_duration, segments[-1]["end"])
         
-        logger.info(f"✅ Got {len(all_segments)} segments from {len(chunk_files)} chunks")
+        logger.info(f"✅ Got {len(all_segments)} segments from {total_chunks} chunks (parallel processing)")
         
     finally:
         # Cleanup temp files
@@ -275,8 +315,8 @@ async def transcribe_audio(file_id: str, file_path: Path, filename: str, progres
             try:
                 if temp_path.exists():
                     temp_path.unlink()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not delete temp file: {e}")
         # Also try to cleanup temp directory
         for temp_path in temp_files_to_cleanup:
             try:
@@ -285,8 +325,8 @@ async def transcribe_audio(file_id: str, file_path: Path, filename: str, progres
                     import shutil
                     shutil.rmtree(temp_dir, ignore_errors=True)
                     break
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not cleanup temp dir: {e}")
     
     # Build transcript chunks
     chunks = []
@@ -372,7 +412,7 @@ def list_transcripts() -> List[dict]:
                 "id": data["id"], "title": data["title"], "filename": data["filename"],
                 "duration": data["duration"], "created_at": data["created_at"]
             })
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to load transcript {path}: {e}")
     transcripts.sort(key=lambda x: x["created_at"], reverse=True)
     return transcripts

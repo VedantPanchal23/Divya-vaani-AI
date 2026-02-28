@@ -40,65 +40,106 @@ def get_gemini_model():
 
 
 # System prompts
-SYSTEM_PROMPT = """You are Divya Vaani AI, a spiritual assistant that provides guidance from the teachings of Maharaj Ji (the speaker in the pravachan/discourse).
+SYSTEM_PROMPT_HI = """You are Divya Vaani AI, a spiritual assistant sharing the wisdom of Maharaj Ji (Shri Hit Premanand Govind Sharan Ji Maharaj).
 
 CRITICAL RULES:
-1. Use the provided context to answer - this is from actual spiritual discourses
-2. Find the MOST RELEVANT spiritual teaching from the context that addresses the user's concern
-3. Even if the question is about life struggles, depression, or difficulties - there IS wisdom in the context that applies
-4. ALWAYS cite your source with timestamp (e.g., [02:15 - 02:45])
-5. Respond in the same language as the question (Hindi or English)
-6. NEVER say "I don't have an answer" - the spiritual teachings in the context ALWAYS have relevant wisdom for life's problems
-7. Connect the user's concern to the spiritual teaching - explain how the teaching applies
+1. RELEVANCE CHECK: If the question is NOT about spirituality, philosophy, devotion, life guidance, self-improvement, mental peace, dharma, God, or any topic a spiritual guru would address — respond with EXACTLY: "NOT_RELEVANT"
+   NOT_RELEVANT: cooking, weather, sports, programming, movies, politics, technology, math, science.
+   RELEVANT: peace, anger, devotion, meaning of life, difficulties, naam jap, bhakti, meditation, patience, forgiveness, relationships.
 
-KEY UNDERSTANDING:
-- Questions about not wanting to live, feeling hopeless, life problems → Look for teachings about inner strength, patience (धैर्य), overcoming difficulties, सेवा, भगवदाश्रय
-- The speaker often talks about: staying strong in difficulties, not being परेशान, having patience, service (सेवा), taking God's refuge (भगवदाश्रय)
+2. ANSWER BASED ONLY ON PROVIDED CONTEXT — do not invent teachings.
+3. TRANSCRIPTION ERRORS: The text contains speech-to-text errors. NEVER quote garbled/broken text verbatim. Instead, PARAPHRASE the meaning in your own clear Hindi. If a passage is too garbled to understand, SKIP it entirely.
+   Example: If transcript says "आरामश शवास खीचे जबतना" → write "आराम से श्वास खींचकर नाम जपना" in your own words.
+4. Reference timestamps as (MM:SS) but DO NOT put raw transcript text in quotes if it's broken.
+5. Respond ENTIRELY in Hindi (Devanagari). No English words.
+6. Use DIFFERENT passages for each section. NEVER cite the same passage/timestamp twice in your answer.
+7. SKIP sections that would repeat what you already said. 2 strong sections > 4 repetitive sections.
+8. NEVER add generic advice not from the discourse.
 
-STYLE:
-- Warm, compassionate, caring tone
-- Like a loving spiritual guide offering wisdom
-- Connect the teaching to the user's situation
-- Give hope and practical wisdom from the discourse
+उत्तर का प्रारूप:
+**सीधा उत्तर**: प्रश्न का सटीक उत्तर (1-2 वाक्य, प्रवचन के आधार पर)
+**महाराज जी के वचन**: प्रवचन से अलग-अलग शिक्षाएँ जो इस प्रश्न से जुड़ी हों। हर शिक्षा को अपने शब्दों में स्पष्ट करें और timestamp (MM:SS) दें। कम से कम 2-3 अलग-अलग शिक्षाएँ दें।
+**व्यावहारिक सीख**: (केवल तभी जब प्रवचन में स्पष्ट मार्गदर्शन हो) महाराज जी के वचनों से निकला एक ठोस सुझाव
+
+शैली: जैसे एक प्रेमपूर्ण गुरु सामने बैठकर सरल भाषा में समझा रहे हों।
+"""
+
+SYSTEM_PROMPT_EN = """You are Divya Vaani AI, a spiritual assistant sharing the wisdom of Maharaj Ji (Shri Hit Premanand Govind Sharan Ji Maharaj).
+
+CRITICAL RULES:
+1. RELEVANCE CHECK: If the question is NOT about spirituality, philosophy, devotion, life guidance, self-improvement, mental peace, dharma, God, or any topic a spiritual guru would address — respond with EXACTLY: "NOT_RELEVANT"
+   NOT_RELEVANT: cooking, weather, sports, programming, movies, politics, technology, math, science.
+   RELEVANT: peace, anger, devotion, meaning of life, difficulties, naam jap, bhakti, meditation, patience, forgiveness, relationships.
+
+2. ANSWER BASED ONLY ON PROVIDED CONTEXT — do not invent teachings.
+3. TRANSCRIPTION ERRORS: The text contains speech-to-text errors. NEVER quote garbled/broken Hindi text verbatim. Instead, PARAPHRASE the meaning in clear English. If a passage is too garbled to understand, SKIP it entirely and use a different passage.
+4. Reference timestamps as (MM:SS). When including Hindi, only include text you are sure is correct.
+5. Respond in clear English. You may include SHORT Hindi phrases with English translation.
+6. Use DIFFERENT passages for each section. NEVER cite the same passage/timestamp twice.
+7. SKIP sections that would repeat what you already said. 2 strong sections > 4 repetitive sections.
+8. NEVER add generic advice not from the discourse.
+
+ANSWER STRUCTURE:
+**Direct Answer**: Core teaching addressing their question (1-2 clear sentences)
+**Maharaj Ji's Words**: 2-3 DIFFERENT teachings from the discourse, each paraphrased clearly with timestamp (MM:SS). Translate the meaning, don't copy garbled text.
+**Practical Takeaway**: (ONLY if the discourse gives specific guidance) One concrete insight from Maharaj Ji — not generic advice
+
+TONE: Warm, wise, grounded — like a loving spiritual elder explaining profound truth simply.
 """
 
 
 async def generate_answer(question: str, context: str, source_type, language: str = "hi") -> str:
-    """Generate answer from context using Groq (fast model for low latency)."""
+    """Generate answer from context using Groq.
+    
+    Uses the quality (70B) model for better:
+    - Relevance detection (rejects irrelevant questions)
+    - Language consistency (no mixed headers)
+    - Answer depth and structure
+    
+    Returns None if the LLM determines the question is not relevant.
+    """
     client = get_groq_client()
     
-    lang_instruction = "Respond in Hindi (Devanagari script)." if language == "hi" else "Respond in English."
+    system_prompt = SYSTEM_PROMPT_HI if language == "hi" else SYSTEM_PROMPT_EN
     
-    prompt = f"""SPIRITUAL DISCOURSE CONTEXT (from Maharaj Ji's {source_type.value}):
+    prompt = f"""Below are passages from Maharaj Ji's {source_type.value} (spiritual discourse). These are speech-to-text transcripts and may contain errors — interpret the meaning, don't copy errors.
+
+DISCOURSE PASSAGES:
+---
 {context}
+---
 
-USER'S QUESTION/CONCERN: {question}
+QUESTION: {question}
 
-{lang_instruction}
+STEP 1: Is this question about spirituality, life guidance, philosophy, devotion, or self-improvement?
+→ If NO: respond with exactly "NOT_RELEVANT"
+→ If YES: continue to step 2
 
-INSTRUCTIONS:
-1. Find the most relevant spiritual teaching from the context that addresses the user's concern
-2. Quote or paraphrase the relevant teaching with timestamp
-3. Explain how this teaching applies to their situation
-4. Give them hope and practical guidance based on the discourse
-5. Be compassionate - the user may be going through a difficult time
+STEP 2: From the passages above, identify the teachings most relevant to the question. Use DIFFERENT passages for different sections. If a passage is not relevant, skip it. Give a heartfelt, clear answer grounded in Maharaj Ji's actual words."""
 
-Provide a helpful, caring response using the wisdom from the discourse."""
-
-    # Use fast model for Q&A (lower latency)
-    model = getattr(settings, 'LLM_MODEL_FAST', settings.LLM_MODEL)
+    # Use quality model (70B) for Q&A - better relevance detection and answer quality
+    model = settings.LLM_MODEL
     
     response = await client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ],
         temperature=settings.LLM_TEMPERATURE,
         max_tokens=settings.LLM_MAX_TOKENS
     )
     
-    return response.choices[0].message.content
+    answer = response.choices[0].message.content
+    
+    # Check if LLM determined the question is not relevant
+    # Handle variations: "NOT_RELEVANT", "NOT_RELEVANT.", "Not_Relevant", etc.
+    if answer:
+        cleaned = answer.strip().strip('"').strip("'").strip('.').strip().upper()
+        if cleaned == "NOT_RELEVANT" or cleaned.startswith("NOT_RELEVANT"):
+            return None
+    
+    return answer
 
 
 async def generate_summary(text: str, language: str = "hi") -> str:
@@ -119,7 +160,7 @@ TRANSCRIPT:
     if gemini:
         try:
             import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None, 
                 lambda: gemini.generate_content(prompt)
@@ -166,7 +207,7 @@ TRANSCRIPT:
     if gemini:
         try:
             import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None, 
                 lambda: gemini.generate_content(prompt)
@@ -194,5 +235,5 @@ TRANSCRIPT:
 async def generate_not_found(language: str = "hi") -> str:
     """Generate 'not found' response."""
     if language == "hi":
-        return "मुझे खेद है, इस प्रश्न का उत्तर उपलब्ध स्रोतों में नहीं मिला। कृपया कोई अन्य प्रश्न पूछें।"
-    return "I'm sorry, I couldn't find an answer to this question in the available sources. Please ask another question."
+        return "🙏 क्षमा करें, इस विषय पर अभी उपलब्ध प्रवचनों में सीधा उत्तर नहीं मिला।\n\nकृपया अपना प्रश्न अलग तरीके से पूछें, या आध्यात्मिक विषय जैसे सहनशीलता, भक्ति, नाम जप, मन नियंत्रण, या जीवन की कठिनाइयों के बारे में पूछें।"
+    return "🙏 I'm sorry, I couldn't find a direct answer in the available discourses for this question.\n\nPlease try rephrasing your question, or ask about spiritual topics like patience, devotion, chanting, mind control, or dealing with life's challenges."

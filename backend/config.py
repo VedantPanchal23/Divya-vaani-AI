@@ -16,8 +16,12 @@ class Settings(BaseSettings):
     
     # App Info
     APP_NAME: str = "Divya Vaani AI"
-    APP_VERSION: str = "3.0.0"
-    DEBUG: bool = True
+    APP_VERSION: str = "3.0.1"
+    DEBUG: bool = False  # Set to True only for development
+    
+    # Security
+    MAX_UPLOAD_SIZE_MB: int = 500  # Maximum file upload size in MB
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"  # Comma-separated allowed origins
     
     # Server
     HOST: str = "0.0.0.0"
@@ -30,10 +34,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     
     # LLM Settings
-    LLM_MODEL: str = "llama-3.3-70b-versatile"  # For summaries/explanations (quality)
-    LLM_MODEL_FAST: str = "llama-3.1-8b-instant"  # For Q&A (speed) - ~5x faster
+    LLM_MODEL: str = "llama-3.3-70b-versatile"  # For Q&A and summaries
     LLM_TEMPERATURE: float = 0.3
-    LLM_MAX_TOKENS: int = 2000
+    LLM_MAX_TOKENS: int = 2500
     
     # TTS Settings (Optimized for Speed)
     TTS_MODE: str = "clone"        # "fast" (Edge TTS - low latency) or "clone" (voice cloning)
@@ -53,10 +56,20 @@ class Settings(BaseSettings):
         return path
     
     @property
-    def TRANSCRIPTS_DIR(self) -> Path:
+    def TRANSCRIPT_DIR(self) -> Path:
         path = DATA_DIR / "transcripts"
         path.mkdir(parents=True, exist_ok=True)
         return path
+    
+    @property
+    def TRANSCRIPTS_DIR(self) -> Path:
+        # Alias for backward compatibility
+        return self.TRANSCRIPT_DIR
+    
+    @property
+    def DATA_DIR(self) -> Path:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        return DATA_DIR
     
     @property
     def AUDIO_DIR(self) -> Path:

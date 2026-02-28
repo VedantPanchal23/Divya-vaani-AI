@@ -37,6 +37,14 @@ async def lifespan(app: FastAPI):
     else:
         print("❌ GROQ_API_KEY not set! Check .env file")
     
+    # Initialize video content store
+    try:
+        from data.videos_content import init_videos_content
+        init_videos_content()
+        print("✅ Video content store initialized")
+    except Exception as e:
+        logger.warning(f"Video content init failed: {e}")
+    
     # Check voice cloning settings
     if settings.USE_VOICE_CLONING:
         print("✅ Voice Cloning enabled (XTTS-v2)")
@@ -76,10 +84,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
+# CORS - Use configured origins or default to localhost for development
+cors_origins = getattr(settings, 'CORS_ORIGINS', 'http://localhost:5173').split(',')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

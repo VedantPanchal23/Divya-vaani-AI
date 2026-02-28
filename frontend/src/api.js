@@ -5,48 +5,55 @@
 
 const API_BASE = '/api';
 
+// ========== Video Content APIs ==========
+
 /**
- * Upload audio/video file for transcription
+ * Get all pre-loaded videos for the home page
  */
-export async function uploadFile(file, onProgress) {
-    const formData = new FormData();
-    formData.append('file', file);
+export async function getVideos() {
+    const response = await fetch(`${API_BASE}/videos`);
+    if (!response.ok) throw new Error('Failed to get videos');
+    return response.json();
+}
 
-    const response = await fetch(`${API_BASE}/upload`, {
+/**
+ * Get full video content (transcript, summary, explanation)
+ * Returns both Hindi and English variants in a single call.
+ * @param {string} videoId - The video ID
+ * @param {string} language - Primary language ("hi" or "en")
+ */
+export async function getVideo(videoId, language = 'hi') {
+    const response = await fetch(`${API_BASE}/videos/${videoId}?language=${language}`);
+    if (!response.ok) {
+        if (response.status === 404) throw new Error('Video not found');
+        throw new Error('Failed to get video');
+    }
+    return response.json();
+}
+
+/**
+ * Get video thumbnail URL
+ */
+export function getThumbnailUrl(videoId) {
+    return `${API_BASE}/thumbnail/${videoId}`;
+}
+
+/**
+ * Request summary generation for a video
+ * @param {string} videoId - The video ID
+ */
+export async function generateVideoSummary(videoId) {
+    const response = await fetch(`${API_BASE}/videos/${videoId}/generate-summary`, {
         method: 'POST',
-        body: formData,
     });
-
     if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail || 'Upload failed');
-    }
-
-    return response.json();
-}
-
-/**
- * Get transcript status and content
- * @param {string} transcriptId - The transcript/file ID
- * @param {string} language - Language for summary/explanation ("hi" or "en")
- */
-export async function getTranscript(transcriptId, language = 'hi') {
-    const response = await fetch(`${API_BASE}/transcript/${transcriptId}?language=${language}`);
-    if (!response.ok) {
-        if (response.status === 404) throw new Error('Transcript not found');
-        throw new Error('Failed to get transcript');
+        throw new Error(error.detail || 'Failed to generate summary');
     }
     return response.json();
 }
 
-/**
- * List all transcripts
- */
-export async function getTranscripts() {
-    const response = await fetch(`${API_BASE}/transcripts`);
-    if (!response.ok) throw new Error('Failed to get transcripts');
-    return response.json();
-}
+// ========== Chat / Q&A ==========
 
 /**
  * Send a chat message / ask a question
@@ -76,48 +83,6 @@ export async function sendMessage(question, transcriptId = null, language = 'hi'
 }
 
 /**
- * Transcribe voice input
- * @param {Blob} audioBlob - Audio blob from recording
- */
-export async function transcribeVoice(audioBlob) {
-    const formData = new FormData();
-    formData.append('audio', audioBlob, 'voice.webm');
-
-    const response = await fetch(`${API_BASE}/transcribe-voice`, {
-        method: 'POST',
-        body: formData,
-    });
-
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Voice transcription failed');
-    }
-
-    return response.json();
-}
-
-/**
- * Generate text-to-speech audio
- * @param {string} text - Text to convert to speech
- * @param {string} language - Language ("hi" or "en")
- */
-export async function textToSpeech(text, language = 'hi') {
-    const response = await fetch(`${API_BASE}/tts`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text, language }),
-    });
-
-    if (!response.ok) {
-        throw new Error('TTS generation failed');
-    }
-
-    return response.json();
-}
-
-/**
  * Get audio file URL
  */
 export function getAudioUrl(filename) {
@@ -133,7 +98,72 @@ export async function healthCheck() {
     return response.json();
 }
 
-// Legacy API compatibility - map old names to new ones
-export const getSessions = getTranscripts;
-export const getSession = getTranscript;
-export const getUploadStatus = getTranscript;
+// ========== Admin APIs ==========
+
+/**
+ * Submit a YouTube URL for processing
+ * @param {string} url - YouTube URL
+ * @param {string} speaker - Speaker name
+ * @param {string} category - Video category
+ */
+export async function addYouTubeVideo(url, speaker = 'Maharaj Ji', category = 'pravachan') {
+    const response = await fetch(`${API_BASE}/admin/youtube`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, speaker, category }),
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to add video');
+    }
+    return response.json();
+}
+
+/**
+ * Get YouTube processing job status
+ * @param {string} jobId - The job ID
+ */
+export async function getYouTubeJobStatus(jobId) {
+    const response = await fetch(`${API_BASE}/admin/youtube/${jobId}`);
+    if (!response.ok) throw new Error('Failed to get job status');
+    return response.json();
+}
+
+/**
+ * List all YouTube processing jobs
+ */
+export async function listYouTubeJobs() {
+    const response = await fetch(`${API_BASE}/admin/youtube`);
+    if (!response.ok) throw new Error('Failed to list jobs');
+    return response.json();
+}
+
+/**
+ * Delete a video
+ * @param {string} videoId - Video ID to delete
+ */
+export async function deleteVideo(videoId) {
+    const response = await fetch(`${API_BASE}/admin/videos/${videoId}`, {
+        method: 'DELETE',
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to delete video');
+    }
+    return response.json();
+}
+
+/**
+ * Regenerate summary & explanation for a video
+ * @param {string} videoId - Video ID
+ */
+export async function regenerateVideoContent(videoId) {
+    const response = await fetch(`${API_BASE}/admin/videos/${videoId}/regenerate`, {
+        method: 'POST',
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to regenerate');
+    }
+    return response.json();
+}

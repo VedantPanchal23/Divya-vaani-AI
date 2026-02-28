@@ -1,25 +1,15 @@
 """
-Divya Vaani AI - TTS Engine v3.2 (With Voice Cloning)
-Supports multiple TTS backends:
+Divya Vaani AI - TTS Engine v3.3 (Streamlined)
+Supports:
 1. Voice Cloning (XTTS) - Clone speaker's voice from reference audio
 2. Edge TTS - Fast cloud TTS (default fallback)
 3. gTTS - Google TTS (reliable fallback)
-
-Performance:
-- Voice Cloning: ~3-10s per generation (GPU), ~15-30s (CPU)
-- Edge TTS: ~200-500ms latency (cloud)
-- gTTS: ~2-5s per generation
-
-Usage:
-- Set USE_VOICE_CLONING=true in .env to enable voice cloning
-- Place reference audio in backend/data/reference_audio/ or Input/
 """
 import logging
 import uuid
 import asyncio
-import json
 from pathlib import Path
-from typing import Optional, Tuple, Any
+from typing import Optional
 
 from config import settings
 
@@ -39,17 +29,6 @@ EDGE_TTS_VOICES = {
 
 # Voice mode: "fast" (Edge TTS), "clone" (voice cloning), "gtts" (Google TTS)
 DEFAULT_MODE = "fast"
-
-# Global state - Voice sample paths
-_voice_sample_path: Optional[Path] = None
-_voice_sample_transcript: Optional[str] = None
-
-# Global state - F5-TTS model cache (loaded once, reused)
-_f5_model: Optional[Any] = None
-_f5_vocoder: Optional[Any] = None
-_f5_ref_audio: Optional[Any] = None  # Pre-processed reference audio
-_f5_ref_text: Optional[str] = None
-_f5_device: Optional[str] = None
 
 
 # =============================================================================
@@ -241,7 +220,7 @@ async def _generate_with_gtts_fallback(text: str, language: str, output_path: Pa
             tts.save(str(output_path))
             return output_path.exists()
         
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, generate_sync)
         
         if result:
@@ -298,266 +277,6 @@ def _clean_text_for_tts(text: str) -> str:
 
 
 # =============================================================================
-# F5-TTS Voice Cloning (Optional, with Caching for Speed)
-# =============================================================================
-
-def _find_voice_sample() -> Tuple[Optional[Path], Optional[str]]:
-    """Find Maharaj's voice sample for cloning."""
-    global _voice_sample_path, _voice_sample_transcript
-    
-    if _voice_sample_path is not None:
-        return _voice_sample_path, _voice_sample_transcript
-    
-    # Default transcript for reference
-    default_transcript = "प्रेमानंद महाराज का प्रवचन। भगवद्गीता के अनुसार कर्म और धर्म का मार्ग।"
-    
-    # Check configured path
-    if settings.VOICE_SAMPLE_PATH and Path(settings.VOICE_SAMPLE_PATH).exists():
-        _voice_sample_path = Path(settings.VOICE_SAMPLE_PATH)
-        transcript_path = _voice_sample_path.with_suffix('.txt')
-        _voice_sample_transcript = transcript_path.read_text(encoding='utf-8').strip() if transcript_path.exists() else default_transcript
-        return _voice_sample_path, _voice_sample_transcript
-    
-    # Check reference_audio directory
-    ref_dir = Path(__file__).parent.parent / "data" / "reference_audio"
-    if ref_dir.exists():
-        for audio_file in ref_dir.glob("*.wav"):
-            transcript_path = audio_file.with_suffix('.txt')
-            if transcript_path.exists():
-                _voice_sample_path = audio_file
-                _voice_sample_transcript = transcript_path.read_text(encoding='utf-8').strip()
-                return _voice_sample_path, _voice_sample_transcript
-    
-    # Check Input folder
-    input_dir = Path(__file__).parent.parent.parent / "Input"
-    for name in ["maharaj_audio.mp3", "maharaj-voice.mp3", "maharaj_voice.wav"]:
-        path = input_dir / name
-        if path.exists():
-            _voice_sample_path = path
-            _voice_sample_transcript = default_transcript
-            return _voice_sample_path, _voice_sample_transcript
-    
-    return None, None
-
-
-def _load_f5_model():
-    """
-    Load F5-TTS model ONCE and cache it in memory.
-    Subsequent calls reuse the cached model (huge speed improvement).
-    """
-    global _f5_model, _f5_vocoder, _f5_device
-    
-    if _f5_model is not None:
-        return _f5_model, _f5_vocoder, _f5_device
-    
-    try:
-        import torch
-        from f5_tts.model import DiT
-        from f5_tts.infer.utils_infer import load_vocoder, load_model
-        
-        logger.info("🎤 Loading F5-TTS model (one-time)...")
-        
-        # Device selection
-        _f5_device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"   Device: {_f5_device}")
-        
-        # Load vocoder (one-time)
-        _f5_vocoder = load_vocoder(vocoder_name="vocos", is_local=False)
-        
-        # Load F5-TTS model (one-time)
-        model_cls = DiT
-        model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
-        _f5_model = load_model(model_cls, model_cfg, "", mel_spec_type="vocos", vocab_file="")
-        
-        logger.info("✅ F5-TTS model cached in memory")
-        return _f5_model, _f5_vocoder, _f5_device
-        
-    except ImportError as e:
-        logger.warning(f"F5-TTS not available: {e}")
-        return None, None, None
-    except Exception as e:
-        logger.error(f"Failed to load F5-TTS: {e}")
-        return None, None, None
-
-
-def _preprocess_reference_audio(voice_sample: Path, ref_transcript: str):
-    """
-    Pre-process reference audio ONCE and cache it.
-    This is the expensive operation that we want to avoid repeating.
-    """
-    global _f5_ref_audio, _f5_ref_text
-    
-    # Return cached if same reference
-    if _f5_ref_audio is not None and _f5_ref_text == ref_transcript:
-        return _f5_ref_audio, _f5_ref_text
-    
-    try:
-        from f5_tts.infer.utils_infer import preprocess_ref_audio_text
-        
-        logger.info(f"🎤 Pre-processing reference audio (one-time): {voice_sample.name}")
-        
-        # This processes the reference audio and extracts features
-        ref_audio_path = str(voice_sample.absolute())
-        _f5_ref_audio = ref_audio_path  # Store path for now
-        _f5_ref_text = ref_transcript
-        
-        logger.info("✅ Reference audio cached")
-        return _f5_ref_audio, _f5_ref_text
-        
-    except Exception as e:
-        logger.error(f"Failed to preprocess reference: {e}")
-        return None, None
-
-
-async def _generate_with_f5tts(
-    text: str, 
-    voice_sample: Path,
-    ref_transcript: str, 
-    output_path: Path
-) -> bool:
-    """
-    Generate speech using F5-TTS with CACHED model and reference.
-    First call: ~15s (loads model + processes reference)
-    Subsequent calls: ~2-5s (uses cache)
-    """
-    try:
-        # Load cached model (or load once if first time)
-        model, vocoder, device = _load_f5_model()
-        if model is None:
-            return False
-        
-        # Get cached reference audio
-        ref_audio, ref_text = _preprocess_reference_audio(voice_sample, ref_transcript)
-        if ref_audio is None:
-            return False
-        
-        # Clean text
-        clean_text = _clean_text_for_tts(text)
-        if len(clean_text) > 200:
-            clean_text = clean_text[:200]
-            last_punct = max(clean_text.rfind('।'), clean_text.rfind('.'), clean_text.rfind(','))
-            if last_punct > 150:
-                clean_text = clean_text[:last_punct + 1]
-        
-        logger.info(f"🎤 F5-TTS generating: '{clean_text[:30]}...'")
-        
-        # Run inference in thread pool (CPU-bound)
-        loop = asyncio.get_event_loop()
-        wav_output = output_path.with_suffix('.wav')
-        
-        def _generate():
-            import soundfile as sf
-            from f5_tts.infer.utils_infer import infer_process
-            
-            audio, sr, _ = infer_process(
-                ref_audio,
-                ref_text,
-                clean_text,
-                model,
-                vocoder,
-                mel_spec_type="vocos",
-                speed=1.0,
-                device=device,
-            )
-            sf.write(str(wav_output), audio, sr)
-            return wav_output.exists()
-        
-        success = await loop.run_in_executor(None, _generate)
-        
-        if success:
-            # Convert to mp3
-            await _convert_to_mp3(wav_output, output_path)
-            return output_path.exists()
-        
-        return False
-        
-    except ImportError:
-        # Fall back to CLI if direct import fails
-        logger.info("Using F5-TTS CLI fallback...")
-        return await _generate_with_f5tts_cli(text, voice_sample, ref_transcript, output_path)
-    except Exception as e:
-        logger.error(f"❌ F5-TTS error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return False
-
-
-async def _generate_with_f5tts_cli(
-    text: str, 
-    voice_sample: Path,
-    ref_transcript: str, 
-    output_path: Path
-) -> bool:
-    """Fallback: Generate speech using F5-TTS CLI (slower, no caching)."""
-    try:
-        import sys
-        python_exe = sys.executable
-        
-        clean_text = _clean_text_for_tts(text)
-        if len(clean_text) > 200:
-            clean_text = clean_text[:200]
-        
-        wav_output = output_path.with_suffix('.wav')
-        cmd = [
-            python_exe, "-m", "f5_tts.infer.infer_cli",
-            "-r", str(voice_sample.absolute()),
-            "-s", ref_transcript,
-            "-t", clean_text,
-            "-o", str(wav_output.parent),
-            "-n", wav_output.stem,
-            "--speed", "1.0",
-        ]
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        await asyncio.wait_for(process.communicate(), timeout=120)
-        
-        if wav_output.exists():
-            await _convert_to_mp3(wav_output, output_path)
-            return output_path.exists()
-        
-        return False
-        
-    except Exception as e:
-        logger.error(f"❌ F5-TTS CLI error: {e}")
-        return False
-
-
-async def _convert_to_mp3(wav_path: Path, mp3_path: Path) -> bool:
-    """Convert WAV to MP3 using ffmpeg."""
-    try:
-        cmd = [
-            "ffmpeg", "-y", "-i", str(wav_path),
-            "-codec:a", "libmp3lame", "-b:a", "128k",
-            str(mp3_path)
-        ]
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        await asyncio.wait_for(process.communicate(), timeout=30)
-        
-        # Clean up wav
-        if mp3_path.exists() and wav_path.exists():
-            wav_path.unlink()
-        
-        return mp3_path.exists()
-        
-    except Exception:
-        # If conversion fails, just rename
-        if wav_path.exists():
-            wav_path.rename(mp3_path)
-        return mp3_path.exists()
-
-
-# =============================================================================
 # Sync Wrapper
 # =============================================================================
 
@@ -579,48 +298,17 @@ def generate_speech(text: str, language: str = "hi") -> str:
 
 
 # =============================================================================
-# API Info & Pre-warming
+# API Info
 # =============================================================================
 
 def get_tts_info() -> dict:
     """Get TTS engine information."""
-    voice_sample, _ = _find_voice_sample()
     return {
         "mode": getattr(settings, 'TTS_MODE', DEFAULT_MODE),
-        "edge_tts_available": True,  # Always available via pip
-        "voice_cloning_available": voice_sample is not None,
-        "model_cached": _f5_model is not None,
-        "reference_cached": _f5_ref_audio is not None,
+        "edge_tts_available": True,
+        "voice_cloning_enabled": getattr(settings, 'USE_VOICE_CLONING', False),
         "voices": EDGE_TTS_VOICES
     }
-
-
-async def prewarm_voice_cloning():
-    """
-    Pre-warm the voice cloning model at server startup.
-    Call this during app initialization to avoid cold-start latency.
-    """
-    if getattr(settings, 'TTS_MODE', DEFAULT_MODE) != "clone":
-        logger.info("ℹ️ Voice cloning not enabled, skipping pre-warm")
-        return False
-    
-    voice_sample, transcript = _find_voice_sample()
-    if not voice_sample:
-        logger.warning("⚠️ No voice sample found for pre-warming")
-        return False
-    
-    logger.info("🔥 Pre-warming voice cloning model...")
-    
-    # Load model
-    model, vocoder, device = _load_f5_model()
-    if model is None:
-        return False
-    
-    # Pre-process reference audio
-    _preprocess_reference_audio(voice_sample, transcript)
-    
-    logger.info("✅ Voice cloning ready (model + reference cached)")
-    return True
 
 
 # =============================================================================

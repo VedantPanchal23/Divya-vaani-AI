@@ -96,6 +96,9 @@ def search_transcripts(query: str, transcript_id: str = None, top_k: int = 10) -
     
     Uses semantic similarity to find chunks from spiritual discourses
     that are relevant to the user's question.
+    
+    Deduplicates results to avoid returning near-identical text from
+    duplicate transcript entries.
     """
     global _transcript_meta
     
@@ -107,11 +110,19 @@ def search_transcripts(query: str, transcript_id: str = None, top_k: int = 10) -
     # Embed query (with query prefix for E5)
     q_emb = _embed_text([query], is_query=True)
     
-    # Search more aggressively - get many results then filter
-    k = min(top_k * 5, _transcript_index.ntotal)
+    # If filtering by transcript_id, search more aggressively
+    # because we need to find results in that specific transcript
+    if transcript_id:
+        k = min(500, _transcript_index.ntotal)  # Search more when filtering
+    else:
+        k = min(top_k * 10, _transcript_index.ntotal)  # Search more to deduplicate
+    
     scores, indices = _transcript_index.search(q_emb, k)
     
     results = []
+    seen_texts = set()  # Deduplicate by text content
+    seen_time_windows = {}  # Track time windows per transcript to ensure diversity
+    
     for i, idx in enumerate(indices[0]):
         if idx < 0 or idx >= len(_transcript_meta):
             continue
@@ -130,12 +141,43 @@ def search_transcripts(query: str, transcript_id: str = None, top_k: int = 10) -
             continue
         
         # Skip very short chunks (less meaningful)
-        if len(meta["text"].strip()) < 20:
+        text = meta["text"].strip()
+        if len(text) < 20:
             continue
+        
+        # Skip chunks that are mostly garbled/repetitive transcription
+        # (e.g., "धर्म, धर्म, धर्म..." or chunks with too many commas relative to words)
+        words = text.split()
+        if len(words) > 3:
+            unique_words = set(w.strip('.,।') for w in words if len(w.strip('.,।')) > 1)
+            # If less than 40% unique words, it's likely repetitive/garbled
+            if len(unique_words) / len(words) < 0.4:
+                continue
+        
+        # Deduplicate: skip if we already have very similar text
+        # Use first 60 chars as dedup key (catches duplicates from re-transcription)
+        dedup_key = text[:60].lower().strip()
+        if dedup_key in seen_texts:
+            continue
+        seen_texts.add(dedup_key)
+        
+        # Diversity filter: avoid multiple chunks from same 2-minute window 
+        # in the same transcript (they often say the same thing)
+        tid = meta["transcript_id"]
+        start = meta.get("start_time", 0)
+        time_bucket = int(start / 120)  # 2-minute windows
+        bucket_key = f"{tid}_{time_bucket}"
+        
+        if bucket_key in seen_time_windows:
+            # Already have a chunk from this time window in this transcript
+            # Allow max 2 from same window, skip beyond that
+            if seen_time_windows[bucket_key] >= 2:
+                continue
+        seen_time_windows[bucket_key] = seen_time_windows.get(bucket_key, 0) + 1
         
         results.append(TranscriptChunk(
             id=meta["chunk_id"],
-            text=meta["text"],
+            text=text,
             start_time=meta["start_time"],
             end_time=meta["end_time"]
         ))
