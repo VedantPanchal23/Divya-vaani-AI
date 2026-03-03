@@ -8,7 +8,8 @@ import {
     FiChevronDown, FiChevronUp, FiChevronLeft, FiSend, FiX, FiSettings, FiInfo,
     FiSearch, FiArrowLeft, FiFileText, FiMessageCircle, FiBook, FiBookOpen,
     FiList, FiMic, FiVideo, FiMusic, FiGlobe,
-    FiMoreVertical, FiHelpCircle, FiUser, FiLogIn, FiLogOut, FiHeart, FiUserPlus
+    FiMoreVertical, FiHelpCircle, FiUser, FiLogIn, FiLogOut, FiHeart, FiUserPlus,
+    FiCopy, FiCheck, FiRotateCcw
 } from 'react-icons/fi';
 
 import {
@@ -96,6 +97,11 @@ export const Icons = {
     Logout: FiLogOut,
     Heart: FiHeart,
     UserPlus: FiUserPlus,
+
+    // Chat Actions
+    Copy: FiCopy,
+    Check: FiCheck,
+    Retry: FiRotateCcw,
 };
 
 export default Icons;

@@ -70,12 +70,15 @@ export async function generateVideoSummary(videoId) {
 /**
  * Upload audio/video file for transcription
  */
-export async function uploadFile(file) {
+export async function uploadFile(file, adminKey = '') {
     const formData = new FormData();
     formData.append('file', file);
 
+    const headers = adminKey ? { 'X-Admin-Key': adminKey } : authHeaders();
+
     const response = await fetch(`${API_BASE}/upload`, {
         method: 'POST',
+        headers,
         body: formData,
     });
 
@@ -84,6 +87,44 @@ export async function uploadFile(file) {
         throw new Error(error.detail || 'Upload failed');
     }
 
+    return response.json();
+}
+
+/**
+ * Upload a YouTube video by URL for transcription & processing
+ * @param {string} url - YouTube video URL
+ * @param {string} title - Optional custom title
+ * @param {string} adminKey - Admin API key for authentication
+ */
+export async function uploadYouTubeVideo(url, title = '', adminKey = '') {
+    const response = await fetch(`${API_BASE}/upload/youtube`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(adminKey ? { 'X-Admin-Key': adminKey } : authHeaders()),
+        },
+        body: JSON.stringify({ url, title: title || undefined }),
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'YouTube upload failed');
+    }
+
+    return response.json();
+}
+
+/**
+ * Get upload processing status
+ * @param {string} fileId - The file/job ID returned from upload
+ * @param {string} language - Language for content
+ */
+export async function getUploadStatus(fileId, language = 'hi') {
+    const response = await fetch(`${API_BASE}/transcript/${fileId}?language=${language}`);
+    if (!response.ok) {
+        if (response.status === 404) throw new Error('Job not found');
+        throw new Error('Failed to get status');
+    }
     return response.json();
 }
 

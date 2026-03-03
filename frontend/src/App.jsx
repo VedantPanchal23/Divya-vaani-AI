@@ -7,9 +7,10 @@ import { getVideos, getFavorites } from './api';
 import { useAuth } from './components/AuthContext';
 import AuthPage from './components/AuthPage';
 import Profile from './components/Profile';
+import AdminUpload from './components/AdminUpload';
 
 /* Shared header */
-function AppHeader({ theme, isThemeTransitioning, toggleTheme, onAuthClick, onFavoritesClick, showFavorites, onProfileClick }) {
+function AppHeader({ theme, isThemeTransitioning, toggleTheme, onAuthClick, onFavoritesClick, showFavorites, onProfileClick, onUploadClick }) {
     const { user, isAuthenticated, logout } = useAuth();
     const [showUserMenu, setShowUserMenu] = useState(false);
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -31,6 +32,17 @@ function AppHeader({ theme, isThemeTransitioning, toggleTheme, onAuthClick, onFa
                     <Icons.AI size={11} />
                     AI Powered
                 </span>
+
+                {isAuthenticated && (
+                    <button
+                        className="header-badge header-badge-btn"
+                        onClick={onUploadClick}
+                        title="Upload Content"
+                    >
+                        <Icons.Upload size={11} />
+                        Upload
+                    </button>
+                )}
 
                 {isAuthenticated && (
                     <button
@@ -131,6 +143,7 @@ function App() {
     const [selectedCategory, setSelectedCategory] = useState('all');
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [showProfileModal, setShowProfileModal] = useState(false);
+    const [showUploadModal, setShowUploadModal] = useState(false);
     const [showFavorites, setShowFavorites] = useState(false);
     const [favoriteIds, setFavoriteIds] = useState(new Set());
     const { isAuthenticated } = useAuth();
@@ -215,6 +228,7 @@ function App() {
         theme, isThemeTransitioning, toggleTheme,
         onAuthClick: () => setShowAuthModal(true),
         onProfileClick: () => setShowProfileModal(true),
+        onUploadClick: () => setShowUploadModal(true),
         onFavoritesClick: () => setShowFavorites(prev => !prev),
         showFavorites,
     };
@@ -246,6 +260,12 @@ function App() {
             </footer>
             {showAuthModal && <AuthPage onClose={() => setShowAuthModal(false)} />}
             {showProfileModal && <Profile onClose={() => setShowProfileModal(false)} />}
+            {showUploadModal && (
+                <AdminUpload
+                    onClose={() => setShowUploadModal(false)}
+                    onUploadComplete={() => fetchVideos()}
+                />
+            )}
         </div>
     );
 }

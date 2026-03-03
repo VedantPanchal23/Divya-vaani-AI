@@ -287,7 +287,8 @@ class TestAPIEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["source_type"] == "not_found"
-        assert data["answer"] == "not-found-from-transcript"
+        # After fix: video-scoped not-found returns a user-friendly Hindi message
+        assert "इस प्रवचन" in data["answer"] or data["answer"] == "not-found-from-transcript"
         assert mock_hybrid.call_count == 2  # strict + relaxed retry
         assert mock_search_gita.call_count == 0  # no Gita fallback in video-scoped mode
 

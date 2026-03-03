@@ -64,6 +64,7 @@ function VideoDetail({ videoId, onBack }) {
     const [generatingSummary, setGeneratingSummary] = useState(false);
     const [generateError, setGenerateError] = useState(null);
     const pollIntervalRef = useRef(null);
+    const videoPlayerRef = useRef(null);
 
     // Cleanup timers on unmount
     useEffect(() => {
@@ -208,6 +209,7 @@ function VideoDetail({ videoId, onBack }) {
                         <div className="vd-video-placeholder">
                             {video.video_url ? (
                                 <video 
+                                    ref={videoPlayerRef}
                                     controls 
                                     src={video.video_url}
                                     className="vd-video-player"
@@ -318,6 +320,13 @@ function VideoDetail({ videoId, onBack }) {
                             <Chat
                                 sessionId={videoId}
                                 onNewMessage={() => {}}
+                                onSeekTo={(seconds) => {
+                                    if (videoPlayerRef.current) {
+                                        videoPlayerRef.current.currentTime = seconds;
+                                        videoPlayerRef.current.play().catch(() => {});
+                                        videoPlayerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                }}
                             />
                         </div>
                     </div>

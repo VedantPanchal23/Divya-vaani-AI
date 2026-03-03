@@ -840,11 +840,30 @@ async def chat_stream(
 
     # Greeting check
     q_lower = question.lower().strip()
-    greetings = ["radhe radhe", "radhey radhey", "ram ram", "jai shree krishna",
-                 "jai gurudev", "pranam", "namaste", "hello", "hi", "hare krishna"]
-    if any(q_lower.startswith(g) for g in greetings) and len(q_lower.split()) <= 5:
-        # Greetings go through LLM — stream them
-        pass  # Fall through to the pipeline below
+    greetings_en_s = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "namaste"]
+    greetings_hi_s = ["नमस्ते", "नमस्कार", "हेलो", "हाय", "राधे राधे", "जय श्री कृष्ण", "हरि ॐ"]
+    greetings_extra_s = ["radhe radhe", "radhey radhey", "ram ram", "jai shree krishna",
+                         "jai gurudev", "pranam", "hare krishna"]
+    is_greeting_s = (
+        q_lower in greetings_en_s
+        or question.strip() in greetings_hi_s
+        or (any(q_lower.startswith(g) for g in greetings_extra_s) and len(q_lower.split()) <= 5)
+    )
+    if is_greeting_s:
+        greeting_msg = (
+            "राधे राधे! मैं दिव्य वाणी AI हूं। आप महाराज जी के प्रवचनों से संबंधित कोई भी प्रश्न पूछ सकते हैं। "
+            "जैसे - 'भक्ति क्या है?', 'मन को शांत कैसे करें?', 'जीवन में धैर्य कैसे रखें?'"
+            if language == "hi" else
+            "Radhe Radhe! I am Divya Vaani AI. You can ask any question related to Maharaj Ji's discourses. "
+            "For example - 'What is devotion?', 'How to find peace of mind?', 'How to have patience in life?'"
+        )
+        async def _stream_greeting():
+            yield _sse_event({"type": "meta", "source_type": "not_found", "source_reference": ""})
+            yield _sse_event({"type": "chunk", "text": greeting_msg})
+            yield _sse_event({"type": "done"})
+        resp = ChatResponse(answer=greeting_msg, source_type=SourceType.NOT_FOUND, source_reference="", audio_url="")
+        await _persist_chat(db, user, content_id, question, resp)
+        return StreamingResponse(_stream_greeting(), media_type="text/event-stream")
 
     # Off-topic check
     sensitivity = _detect_sensitive_topic(question)
@@ -859,6 +878,47 @@ async def chat_stream(
         return StreamingResponse(_stream_offtopic(), media_type="text/event-stream")
 
     extra_instruction = sensitivity if sensitivity and sensitivity != "OFF_TOPIC" else ""
+
+    # ── Summary request handling (critical — was missing from stream endpoint) ──
+    if _is_summary_request(question) and content_id:
+        try:
+            video = await crud.get_video_by_id(db, content_id)
+            if video:
+                summary_text = (
+                    video.summary_hi if language == "hi" else video.summary_en
+                ) or video.summary_hi or video.summary_en
+                if summary_text:
+                    summary_ref = f"Summary of: {video.title_hi or video.title or 'this discourse'}"
+                    async def _stream_summary():
+                        yield _sse_event({"type": "meta", "source_type": "pravachan", "source_reference": summary_ref})
+                        # Stream summary in small chunks for natural feel
+                        words = summary_text.split(' ')
+                        chunk_size = 4
+                        for i in range(0, len(words), chunk_size):
+                            chunk_text = ' '.join(words[i:i+chunk_size])
+                            if i > 0:
+                                chunk_text = ' ' + chunk_text
+                            yield _sse_event({"type": "chunk", "text": chunk_text})
+                        yield _sse_event({"type": "done"})
+                    resp = ChatResponse(answer=summary_text, source_type=SourceType.PRAVACHAN, source_reference=summary_ref, audio_url="")
+                    _answer_cache.put(question, content_id, language, resp)
+                    await _persist_chat(db, user, content_id, question, resp)
+                    return StreamingResponse(_stream_summary(), media_type="text/event-stream")
+                else:
+                    no_summary_msg = (
+                        "इस प्रवचन का सारांश अभी उपलब्ध नहीं है। कृपया वीडियो पेज पर 'Generate' बटन दबाकर सारांश बनवाएं, या कोई विशिष्ट प्रश्न पूछें।"
+                        if language == "hi" else
+                        "The summary for this discourse is not available yet. Please click the 'Generate' button on the video page, or ask a specific question."
+                    )
+                    async def _stream_no_summary():
+                        yield _sse_event({"type": "meta", "source_type": "not_found", "source_reference": ""})
+                        yield _sse_event({"type": "chunk", "text": no_summary_msg})
+                        yield _sse_event({"type": "done"})
+                    resp = ChatResponse(answer=no_summary_msg, source_type=SourceType.NOT_FOUND, source_reference="", audio_url="")
+                    await _persist_chat(db, user, content_id, question, resp)
+                    return StreamingResponse(_stream_no_summary(), media_type="text/event-stream")
+        except Exception as e:
+            logger.warning(f"[Stream] Summary lookup failed for {content_id}: {e}")
 
     # Cache check
     cached = _answer_cache.get(question, content_id, language)
@@ -890,6 +950,22 @@ async def chat_stream(
             transcript_results = rag_engine.search_transcripts(
                 expanded_query, transcript_id=content_id, top_k=8
             )
+
+        # Relaxed retry when scoped to a specific video but got no results
+        if content_id and not transcript_results:
+            relaxed_threshold = max(settings.SIMILARITY_THRESHOLD - 0.12, 0.25)
+            logger.info(f"[Stream] No strict hits for content_id={content_id}; retrying threshold={relaxed_threshold:.2f}")
+            if settings.HYBRID_SEARCH_ENABLED:
+                transcript_results = rag_engine.search_transcripts_hybrid(
+                    expanded_query, transcript_id=content_id, top_k=8,
+                    semantic_min_score=relaxed_threshold,
+                )
+            else:
+                transcript_results = rag_engine.search_transcripts(
+                    expanded_query, transcript_id=content_id, top_k=8,
+                    min_score=relaxed_threshold,
+                )
+
         transcript_results = _rerank_results(question, transcript_results)
         if transcript_results:
             best_transcript_score = transcript_results[0].get("score", 0)

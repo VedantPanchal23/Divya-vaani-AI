@@ -1159,6 +1159,142 @@ a:hover { color: var(--color-accent-hover); }
   50%      { opacity: 0; }
 }
 
+/* ===== Professional Chat Message Formatting ===== */
+
+/* Message body container */
+.chat-msg-body {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.chat-msg-body p, .chat-md-para {
+  margin: 0 0 6px;
+  line-height: 1.65;
+}
+.chat-msg-body p:last-child, .chat-md-para:last-child { margin-bottom: 0; }
+
+/* Markdown lists */
+.chat-md-list {
+  margin: 6px 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+.chat-md-list li {
+  margin-bottom: 3px;
+  line-height: 1.6;
+}
+
+/* Numbered items */
+.chat-md-numbered {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0;
+  line-height: 1.6;
+}
+.chat-md-num {
+  font-weight: 700;
+  color: var(--color-accent);
+  flex-shrink: 0;
+  min-width: 18px;
+}
+
+/* Timestamp badges [MM:SS - MM:SS] */
+.chat-ts-badge {
+  display: inline;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-deep, var(--color-accent));
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78em;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+[data-theme="dark"] .chat-ts-badge {
+  background: var(--color-accent-surface, rgba(217, 119, 6, 0.15));
+  color: var(--color-accent);
+}
+
+/* Error message styling */
+.chat-message.error.assistant {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: rgba(220, 38, 38, 0.04);
+}
+[data-theme="dark"] .chat-message.error.assistant {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+/* Typing indicator (bouncing dots) */
+.chat-typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+}
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  opacity: 0.5;
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.16s; }
+.typing-dot:nth-child(3) { animation-delay: 0.32s; }
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-6px); opacity: 1; }
+}
+
+/* Message action buttons (copy, retry, TTS) */
+.chat-msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.chat-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  font-family: var(--font-primary);
+}
+.chat-action-btn:hover {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.chat-action-btn.copied {
+  background: rgba(22, 163, 74, 0.1);
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.3);
+}
+.chat-retry-btn:hover {
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+/* Auto-growing textarea */
+.chat-textarea {
+  resize: none;
+  overflow-y: auto;
+  max-height: 120px;
+  min-height: 38px;
+  line-height: 1.4;
+  padding: 9px 16px;
+}
+
 /* Mic error */
 .chat-mic-error {
   padding: 6px 12px;
@@ -2345,4 +2481,234 @@ a:hover { color: var(--color-accent-hover); }
   }
   .user-menu-name { display: none; }
   .header-login-btn span { display: none; }
+}
+
+/* ============================================
+   CLICKABLE TIMESTAMP BADGES
+   ============================================ */
+.chat-ts-badge.clickable {
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.chat-ts-badge.clickable:hover {
+  background: var(--color-accent);
+  color: white;
+  transform: scale(1.05);
+}
+
+/* ============================================
+   ADMIN UPLOAD MODAL
+   ============================================ */
+.admin-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.admin-upload-modal {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+
+.admin-upload-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-5);
+}
+.admin-upload-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.admin-upload-field {
+  margin-bottom: var(--space-4);
+}
+.admin-upload-field label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-1);
+}
+.admin-upload-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-family: var(--font-primary);
+  font-size: 0.9rem;
+  transition: border-color var(--transition-fast);
+  box-sizing: border-box;
+}
+.admin-upload-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.admin-upload-tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-2);
+}
+.admin-upload-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-family: var(--font-primary);
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: all var(--transition-fast);
+}
+.admin-upload-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+.admin-upload-tab.active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  font-weight: 600;
+}
+.admin-upload-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.admin-upload-submit {
+  width: 100%;
+  justify-content: center;
+  padding: 12px;
+  font-size: 0.92rem;
+}
+
+.admin-upload-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+.admin-upload-dropzone:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.admin-upload-dropzone p {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+.admin-upload-dropzone span {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+/* Processing status */
+.admin-upload-status {
+  padding: var(--space-4);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+}
+.admin-upload-status-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.88rem;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+}
+.admin-upload-progress {
+  height: 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: var(--space-2);
+}
+.admin-upload-progress-bar {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+.admin-upload-progress-label {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* Success state */
+.admin-upload-success {
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  color: #22c55e;
+}
+.admin-upload-success h3 {
+  margin: var(--space-3) 0 var(--space-2);
+  color: var(--color-text-primary);
+  font-size: 1.1rem;
+}
+.admin-upload-success p {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: 0.88rem;
+}
+
+/* Error message */
+.admin-upload-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius);
+  color: #ef4444;
+  font-size: 0.85rem;
+  margin-top: var(--space-3);
+}
+
+@media (max-width: 480px) {
+  .admin-upload-modal {
+    max-width: 100%;
+    border-radius: var(--radius);
+  }
 }

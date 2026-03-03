@@ -14,7 +14,94 @@ function getSpeechRecognition() {
         || null;
 }
 
-function Chat({ sessionId, onNewMessage }) {
+// ========== Markdown-like message formatter ==========
+function formatChatMessage(text, onTimestampClick) {
+    if (!text) return null;
+
+    const renderInline = (str, keyPrefix) => {
+        if (!str) return str;
+        // Match **bold** and [MM:SS - MM:SS] timestamps
+        const regex = /(\*\*(.+?)\*\*)|(\[(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\])/g;
+        const parts = [];
+        let lastIndex = 0;
+        let match;
+        let i = 0;
+        while ((match = regex.exec(str)) !== null) {
+            if (match.index > lastIndex) {
+                parts.push(<span key={`${keyPrefix}-t${i++}`}>{str.slice(lastIndex, match.index)}</span>);
+            }
+            if (match[2]) {
+                parts.push(<strong key={`${keyPrefix}-b${i++}`}>{match[2]}</strong>);
+            } else if (match[4] && match[5]) {
+                const startTime = match[4];
+                const clickable = !!onTimestampClick;
+                parts.push(
+                    <span
+                        key={`${keyPrefix}-ts${i++}`}
+                        className={`chat-ts-badge ${clickable ? 'clickable' : ''}`}
+                        onClick={clickable ? () => {
+                            const [m, s] = startTime.split(':').map(Number);
+                            onTimestampClick(m * 60 + s);
+                        } : undefined}
+                        title={clickable ? `Seek to ${startTime}` : undefined}
+                    >
+                        {match[0]}
+                    </span>
+                );
+            }
+            lastIndex = match.index + match[0].length;
+        }
+        if (lastIndex < str.length) {
+            parts.push(<span key={`${keyPrefix}-e${i}`}>{str.slice(lastIndex)}</span>);
+        }
+        return parts.length > 0 ? parts : str;
+    };
+
+    const lines = text.split('\n');
+    const elements = [];
+    let listItems = [];
+
+    const flushList = (key) => {
+        if (listItems.length > 0) {
+            elements.push(<ul key={`ul-${key}`} className="chat-md-list">{[...listItems]}</ul>);
+            listItems = [];
+        }
+    };
+
+    lines.forEach((line, idx) => {
+        const trimmed = line.trim();
+        // Bullet points (-, *, •)
+        if (/^[-*•]\s+/.test(trimmed)) {
+            const content = trimmed.replace(/^[-*•]\s+/, '');
+            listItems.push(<li key={`li-${idx}`}>{renderInline(content, `li-${idx}`)}</li>);
+        }
+        // Numbered items (1. or 1))
+        else if (/^\d+[.)]\s+/.test(trimmed)) {
+            flushList(idx);
+            const content = trimmed.replace(/^\d+[.)]\s+/, '');
+            const num = trimmed.match(/^\d+/)[0];
+            elements.push(
+                <div key={`num-${idx}`} className="chat-md-numbered">
+                    <span className="chat-md-num">{num}.</span>
+                    <span>{renderInline(content, `num-${idx}`)}</span>
+                </div>
+            );
+        }
+        // Empty line
+        else if (!trimmed) {
+            flushList(idx);
+        }
+        // Regular paragraph
+        else {
+            flushList(idx);
+            elements.push(<p key={`p-${idx}`} className="chat-md-para">{renderInline(trimmed, `p-${idx}`)}</p>);
+        }
+    });
+    flushList('end');
+    return elements.length > 0 ? elements : <p className="chat-md-para">{text}</p>;
+}
+
+function Chat({ sessionId, onNewMessage, onSeekTo }) {
     const { isAuthenticated } = useAuth();
     const chatKey = `chat_${sessionId}`;
     const [messages, setMessages] = useState(() => {
@@ -35,6 +122,7 @@ function Chat({ sessionId, onNewMessage }) {
     const [micSupported, setMicSupported] = useState(false);
     const [micLevel, setMicLevel] = useState(0); // 0-100 for visual feedback
     const [confirmingClear, setConfirmingClear] = useState(false);
+    const [copiedId, setCopiedId] = useState(null);
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
     const recognitionRef = useRef(null);
@@ -382,6 +470,18 @@ function Chat({ sessionId, onNewMessage }) {
         setInput('');
         setIsLoading(true);
 
+        // Use a ref to accumulate streaming text — avoids O(n) state.map per token
+        const accumulatedTextRef = { current: '' };
+        let rafScheduled = false;
+
+        const flushChunks = () => {
+            rafScheduled = false;
+            const text = accumulatedTextRef.current;
+            setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, content: text } : m
+            ));
+        };
+
         try {
             let lang = outputLanguage;
             if (outputLanguage === 'auto') {
@@ -397,16 +497,17 @@ function Chat({ sessionId, onNewMessage }) {
                     ));
                 },
                 onChunk: (text) => {
-                    setMessages(prev => prev.map(m =>
-                        m.id === assistantId
-                            ? { ...m, content: m.content + text }
-                            : m
-                    ));
+                    accumulatedTextRef.current += text;
+                    if (!rafScheduled) {
+                        rafScheduled = true;
+                        requestAnimationFrame(flushChunks);
+                    }
                 },
                 onDone: () => {
+                    // Final flush with exact accumulated text
                     setMessages(prev => prev.map(m =>
                         m.id === assistantId
-                            ? { ...m, isStreaming: false }
+                            ? { ...m, content: accumulatedTextRef.current, isStreaming: false }
                             : m
                     ));
                     onNewMessage?.();
@@ -459,6 +560,35 @@ function Chat({ sessionId, onNewMessage }) {
             // Auto-cancel after 3 seconds
             setTimeout(() => setConfirmingClear(false), 3000);
         }
+    };
+
+    const handleCopy = async (text, msgId) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedId(msgId);
+            setTimeout(() => setCopiedId(null), 2000);
+        } catch { /* clipboard not available */ }
+    };
+
+    const handleRetry = (msgId) => {
+        // Find the user message right before this error assistant message
+        const idx = messages.findIndex(m => m.id === msgId);
+        if (idx > 0 && messages[idx - 1].role === 'user') {
+            const retryQuestion = messages[idx - 1].content;
+            // Remove the failed pair
+            setMessages(prev => prev.filter((_, i) => i !== idx && i !== idx - 1));
+            // Set input and let user click send (or auto-send)
+            setInput(retryQuestion);
+        }
+    };
+
+    const handleInputAutoGrow = (e) => {
+        if (!isListening) {
+            setInput(e.target.value);
+        }
+        // Auto-grow textarea
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
     };
 
     const detectHindi = (text) => {
@@ -550,21 +680,22 @@ function Chat({ sessionId, onNewMessage }) {
                     messages.map((msg) => (
                         <div
                             key={msg.id}
-                            className={`chat-message ${msg.role} ${detectHindi(msg.content) ? 'hindi' : ''}`}
+                            className={`chat-message ${msg.role} ${msg.isError ? 'error' : ''} ${detectHindi(msg.content) ? 'hindi' : ''}`}
                         >
                             {msg.isStreaming && !msg.content ? (
-                                <div className="chat-loading">
-                                    <Icons.Loading size={18} className="animate-spin" />
-                                    <span>Thinking...</span>
+                                <div className="chat-typing-indicator">
+                                    <span className="typing-dot" />
+                                    <span className="typing-dot" />
+                                    <span className="typing-dot" />
                                 </div>
                             ) : (
-                                <p style={{ fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : undefined }}>
-                                    {msg.content}
+                                <div className="chat-msg-body" style={{ fontFamily: detectHindi(msg.content) ? 'var(--font-hindi)' : undefined }}>
+                                    {msg.role === 'assistant' ? formatChatMessage(msg.content, onSeekTo) : <p className="chat-md-para">{msg.content}</p>}
                                     {msg.isStreaming && <span className="streaming-cursor">▊</span>}
-                                </p>
+                                </div>
                             )}
 
-                            {/* Source badge — text only, no emojis */}
+                            {/* Source badge */}
                             {msg.role === 'assistant' && msg.source && getSourceLabel(msg.source) && !msg.isStreaming && (
                                 <div className={`chat-source-badge ${getSourceClass(msg.source)}`}>
                                     <span className="source-label">{getSourceLabel(msg.source)}</span>
@@ -574,13 +705,36 @@ function Chat({ sessionId, onNewMessage }) {
                                 </div>
                             )}
 
-                            {msg.role === 'assistant' && !msg.isError && !msg.isStreaming && (
-                                <div className="chat-msg-tts">
-                                    <TextToSpeech
-                                        text={msg.content}
-                                        lang={detectHindi(msg.content) ? 'hi' : 'en'}
-                                        audioUrl={msg.audioUrl}
-                                    />
+                            {/* Action buttons for assistant messages */}
+                            {msg.role === 'assistant' && !msg.isStreaming && msg.content && (
+                                <div className="chat-msg-actions">
+                                    {!msg.isError && (
+                                        <TextToSpeech
+                                            text={msg.content}
+                                            lang={detectHindi(msg.content) ? 'hi' : 'en'}
+                                            audioUrl={msg.audioUrl}
+                                        />
+                                    )}
+                                    <button
+                                        className={`chat-action-btn ${copiedId === msg.id ? 'copied' : ''}`}
+                                        onClick={() => handleCopy(msg.content, msg.id)}
+                                        title={copiedId === msg.id ? 'Copied!' : 'Copy response'}
+                                        type="button"
+                                    >
+                                        {copiedId === msg.id ? <Icons.Check size={13} /> : <Icons.Copy size={13} />}
+                                        {copiedId === msg.id ? 'Copied' : 'Copy'}
+                                    </button>
+                                    {msg.isError && (
+                                        <button
+                                            className="chat-action-btn chat-retry-btn"
+                                            onClick={() => handleRetry(msg.id)}
+                                            title="Retry this question"
+                                            type="button"
+                                        >
+                                            <Icons.Retry size={13} />
+                                            Retry
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -623,14 +777,14 @@ function Chat({ sessionId, onNewMessage }) {
                         <Icons.Mic size={17} />
                     </button>
                 )}
-                <input
+                <textarea
                     ref={inputRef}
-                    className="chat-input"
-                    type="text"
+                    className="chat-input chat-textarea"
+                    rows={1}
                     aria-label="Ask a question about this discourse"
                     placeholder={isListening ? 'Listening... speak now' : (outputLanguage === 'hi' ? 'हिंदी में पूछें...' : 'Ask in Hindi or English...')}
                     value={isListening && interimText ? input + (input ? ' ' : '') + interimText : input}
-                    onChange={(e) => { if (!isListening) setInput(e.target.value); }}
+                    onChange={handleInputAutoGrow}
                     onKeyDown={handleKeyDown}
                     disabled={isLoading}
                     autoComplete="off"
