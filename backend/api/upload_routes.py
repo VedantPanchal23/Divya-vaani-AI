@@ -231,6 +231,7 @@ async def _process_youtube_upload(file_id: str, url: str, custom_title: str | No
         yt_title = custom_title or info.get("title") or info.get("fulltitle") or f"YouTube-{file_id}"
         yt_thumbnail = info.get("thumbnail") or ""
         yt_duration = info.get("duration") or 0
+        youtube_id = info.get("id") or _extract_video_id(url)
 
         logger.info(f"✅ YouTube download complete: '{yt_title}' ({yt_duration}s) → {mp3_path.name}")
 
@@ -239,7 +240,15 @@ async def _process_youtube_upload(file_id: str, url: str, custom_title: str | No
         _status[file_id]["progress"] = 10
 
         # Run the standard processing pipeline (same as file upload)
-        await _process_upload_with_metadata(file_id, mp3_path, yt_title, yt_thumbnail, yt_duration, url)
+        await _process_upload_with_metadata(
+            file_id=file_id, 
+            file_path=mp3_path, 
+            title=yt_title, 
+            thumbnail=yt_thumbnail, 
+            duration=yt_duration, 
+            source_url=url,
+            youtube_id=youtube_id
+        )
 
     except Exception as e:
         logger.error(f"YouTube processing failed for {file_id}: {e}")
@@ -254,7 +263,7 @@ async def _process_youtube_upload(file_id: str, url: str, custom_title: str | No
 
 async def _process_upload_with_metadata(
     file_id: str, file_path: Path, title: str,
-    thumbnail: str = "", duration: float = 0, source_url: str = ""
+    thumbnail: str = "", duration: float = 0, source_url: str = "", youtube_id: str = None
 ):
     """Extended processing pipeline with YouTube metadata support."""
     try:
@@ -305,6 +314,7 @@ async def _process_upload_with_metadata(
                 "description_hi": f"स्रोत: {source_url}" if source_url else f"अपलोड: {file_path.name}",
                 "thumbnail": thumbnail or f"/api/thumbnail/{file_id}",
                 "video_url": source_url or "",
+                "youtube_id": youtube_id,
                 "duration": duration or transcript.duration,
                 "transcript": transcript.full_text,
                 "transcript_chunks": [c.model_dump() for c in transcript.chunks],
