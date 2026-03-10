@@ -24,14 +24,6 @@ function AppHeader({ theme, isThemeTransitioning, toggleTheme, onAuthClick, onFa
                 <span className="header-logo-text">Divya Vaani AI</span>
             </div>
             <nav className="header-nav">
-                <span className="header-badge">
-                    <Icons.Globe size={11} />
-                    Hindi · English
-                </span>
-                <span className="header-badge">
-                    <Icons.AI size={11} />
-                    AI Powered
-                </span>
 
                 {isAuthenticated && (
                     <button
