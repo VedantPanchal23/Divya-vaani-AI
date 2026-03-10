@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -112,6 +112,57 @@ def generate_thumbnail(video_path: Path, video_id: str) -> bool:
     except Exception as e:
         logger.error(f"Thumbnail generation error: {e}")
         return False
+
+
+async def _process_youtube_task(url: str, video_id: str):
+    """Background task to download and process YouTube video."""
+    try:
+        import yt_dlp
+    except ImportError:
+        processing_status[video_id] = {"status": "error", "progress": 0, "error": "yt-dlp not installed"}
+        return
+        
+    processing_status[video_id] = {"status": "transcribing", "progress": 5, "message": "Downloading from YouTube..."}
+    
+    try:
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": str(UPLOAD_DIR / f"{video_id}.%(ext)s"),
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+            "quiet": True,
+        }
+        
+        loop = asyncio.get_running_loop()
+        info = {}
+        
+        def _do_download():
+            nonlocal info
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                
+        await loop.run_in_executor(None, _do_download)
+        
+        # Find downloaded file
+        mp3_path = UPLOAD_DIR / f"{video_id}.mp3"
+        if not mp3_path.exists():
+            candidates = list(UPLOAD_DIR.glob(f"{video_id}.*"))
+            if candidates:
+                mp3_path = candidates[0]
+            else:
+                raise RuntimeError("Audio file not found after download")
+                
+        yt_title = info.get("title") or f"YouTube-{video_id}"
+        
+        # Forward to standard processing task
+        await process_video_task(mp3_path, video_id, yt_title)
+        
+    except Exception as e:
+        logger.error(f"YouTube processing failed: {e}")
+        processing_status[video_id] = {"status": "error", "progress": 0, "error": str(e)}
 
 
 async def process_video_task(file_path: Path, video_id: str, original_filename: str = None):
@@ -328,6 +379,14 @@ async def admin_home(db: AsyncSession = Depends(get_db)):
         </div>
         
         <div class="card">
+            <h2>📥 Fetch from YouTube</h2>
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <input type="text" id="youtubeUrl" placeholder="Paste YouTube link here..." style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 16px;">
+                <button onclick="fetchYouTube()" class="btn">Fetch Video</button>
+            </div>
+        </div>
+        
+        <div class="card">
             <h2>📚 Video Library ({len(videos)} videos)</h2>
             <table>
                 <thead>
@@ -438,6 +497,75 @@ async def admin_home(db: AsyncSession = Depends(get_db)):
                 }}
             }}
             
+            async function fetchYouTube() {{
+                const url = document.getElementById('youtubeUrl').value.trim();
+                if (!url) return alert('Please enter a YouTube URL');
+                
+                const progressDiv = document.getElementById('uploadProgress');
+                const progressFill = document.getElementById('progressFill');
+                const statusText = document.getElementById('statusText');
+                
+                progressDiv.style.display = 'block';
+                statusText.textContent = 'Starting YouTube download...';
+                statusText.className = 'status';
+                progressFill.style.width = '5%';
+                
+                try {{
+                    const response = await fetch('/upload/youtube', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                            ...authHeaders()
+                        }},
+                        body: JSON.stringify({{ url: url }})
+                    }});
+                    
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Failed');
+                    
+                    const videoId = data.video_id;
+                    
+                    // Poll for status using the same logic
+                    const pollStatus = async () => {{
+                        const statusResponse = await fetch(`/status/${{videoId}}`);
+                        const status = await statusResponse.json();
+                        
+                        progressFill.style.width = status.progress + '%';
+                        
+                        if (status.status === 'transcribing') {{
+                            statusText.textContent = `Transcribing... ${{status.message || ''}}`;
+                        }} else if (status.status === 'generating_summary') {{
+                            statusText.textContent = 'Generating summary...';
+                        }} else if (status.status === 'generating_explanation') {{
+                            statusText.textContent = 'Generating explanation...';
+                        }} else if (status.status === 'generating_thumbnail') {{
+                            statusText.textContent = 'Generating thumbnail...';
+                        }} else if (status.status === 'generating_themes') {{
+                            statusText.textContent = 'Extracting themes...';
+                        }} else if (status.status === 'indexing') {{
+                            statusText.textContent = 'Indexing for search...';
+                        }} else if (status.status === 'complete') {{
+                            statusText.textContent = '✅ Complete! Video is ready.';
+                            statusText.className = 'status complete';
+                            setTimeout(() => location.reload(), 2000);
+                            return;
+                        }} else if (status.status === 'error') {{
+                            statusText.textContent = '❌ Error: ' + status.error;
+                            statusText.className = 'status error';
+                            return;
+                        }}
+                        
+                        setTimeout(pollStatus, 2000);
+                    }};
+                    
+                    pollStatus();
+                    
+                }} catch (error) {{
+                    statusText.textContent = '❌ Error: ' + error.message;
+                    statusText.className = 'status error';
+                }}
+            }}
+            
             async function regenerate(videoId) {{
                 if (!confirm('Regenerate summary and explanation for this video?')) return;
                 
@@ -518,6 +646,26 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
     background_tasks.add_task(process_video_task, file_path, video_id, file.filename)
     
     return {"video_id": video_id, "message": "Processing started"}
+
+
+@app.post("/upload/youtube", dependencies=[Depends(_verify_admin_key)])
+async def upload_youtube(background_tasks: BackgroundTasks, request: Request):
+    """Upload via YouTube URL."""
+    try:
+        data = await request.json()
+        url = data.get("url")
+        if not url:
+            raise HTTPException(400, "YouTube URL is required")
+        
+        import uuid
+        video_id = str(uuid.uuid4())[:12]
+        
+        processing_status[video_id] = {"status": "processing", "progress": 0}
+        background_tasks.add_task(_process_youtube_task, url, video_id)
+        
+        return {"video_id": video_id, "message": "YouTube download started"}
+    except Exception as e:
+        raise HTTPException(400, f"Invalid request: {e}")
 
 
 @app.get("/status/{video_id}")
