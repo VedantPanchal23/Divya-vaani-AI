@@ -239,6 +239,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Routes
 print("[BOOT] Importing API routes...", flush=True)
 from api import router
+from api.admin_routes import router as admin_router
+
+app.include_router(admin_router, prefix="/admin")
 app.include_router(router, prefix="/api")
 print("[BOOT] API routes loaded OK", flush=True)
 
