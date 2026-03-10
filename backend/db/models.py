@@ -54,6 +54,7 @@ class Video(Base):
     description_hi = Column(Text, nullable=True)
     thumbnail = Column(String(500), nullable=True)
     video_url = Column(String(500), nullable=True)
+    youtube_id = Column(String(50), nullable=True)
     duration = Column(Float, default=0.0)
     category = Column(String(100), default="pravachan")
     speaker = Column(String(200), default="Maharaj Ji")
