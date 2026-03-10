@@ -207,7 +207,17 @@ function VideoDetail({ videoId, onBack }) {
                     {/* Video Player */}
                     <div className="vd-video-section">
                         <div className="vd-video-placeholder">
-                            {video.video_url ? (
+                            {video.youtube_id ? (
+                                <iframe
+                                    ref={videoPlayerRef}
+                                    className="vd-video-player"
+                                    src={`https://www.youtube.com/embed/${video.youtube_id}?enablejsapi=1&rel=0`}
+                                    title="YouTube video player"
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                ></iframe>
+                            ) : video.video_url ? (
                                 <video 
                                     ref={videoPlayerRef}
                                     controls 
@@ -322,8 +332,22 @@ function VideoDetail({ videoId, onBack }) {
                                 onNewMessage={() => {}}
                                 onSeekTo={(seconds) => {
                                     if (videoPlayerRef.current) {
-                                        videoPlayerRef.current.currentTime = seconds;
-                                        videoPlayerRef.current.play().catch(() => {});
+                                        if (video.youtube_id) {
+                                            // Handle YouTube iframe via postMessage API
+                                            videoPlayerRef.current.contentWindow.postMessage(JSON.stringify({
+                                              event: 'command',
+                                              func: 'seekTo',
+                                              args: [seconds, true]
+                                            }), '*');
+                                            videoPlayerRef.current.contentWindow.postMessage(JSON.stringify({
+                                              event: 'command',
+                                              func: 'playVideo'
+                                            }), '*');
+                                        } else {
+                                            // Handle standard HTML5 video
+                                            videoPlayerRef.current.currentTime = seconds;
+                                            videoPlayerRef.current.play().catch(() => {});
+                                        }
                                         videoPlayerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                     }
                                 }}
