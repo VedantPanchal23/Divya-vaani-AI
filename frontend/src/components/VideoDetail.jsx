@@ -211,11 +211,12 @@ function VideoDetail({ videoId, onBack }) {
                                 <iframe
                                     ref={videoPlayerRef}
                                     className="vd-video-player"
-                                    src={`https://www.youtube.com/embed/${video.youtube_id}?enablejsapi=1&rel=0`}
+                                    src={`https://www.youtube-nocookie.com/embed/${video.youtube_id}?enablejsapi=1&rel=0&origin=${window.location.origin}`}
                                     title="YouTube video player"
                                     frameBorder="0"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                     allowFullScreen
+                                    referrerPolicy="strict-origin-when-cross-origin"
                                 ></iframe>
                             ) : video.video_url ? (
                                 <video 
@@ -338,11 +339,11 @@ function VideoDetail({ videoId, onBack }) {
                                               event: 'command',
                                               func: 'seekTo',
                                               args: [seconds, true]
-                                            }), '*');
+                                            }), 'https://www.youtube-nocookie.com');
                                             videoPlayerRef.current.contentWindow.postMessage(JSON.stringify({
                                               event: 'command',
                                               func: 'playVideo'
-                                            }), '*');
+                                            }), 'https://www.youtube-nocookie.com');
                                         } else {
                                             // Handle standard HTML5 video
                                             videoPlayerRef.current.currentTime = seconds;
