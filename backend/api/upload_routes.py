@@ -1,6 +1,7 @@
 """Upload & Transcript routes."""
 import uuid
 import re
+import os
 import time
 import logging
 import tempfile
@@ -150,7 +151,70 @@ async def _download_youtube_audio(url: str, output_dir: Path) -> tuple[Path, dic
             "preferredcodec": "mp3",
             "preferredquality": "192",
         }],
+        # Anti-bot: spoof a real browser User-Agent
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        # Use alternative player clients less likely to trigger bot detection
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb", "android"],
+            }
+        },
     }
+
+    # Cookie support to bypass YouTube bot detection
+    # Auto-detect cookies.txt in common locations
+    cookies_file = os.environ.get("YOUTUBE_COOKIES_FILE", "")
+    cookies_browser = os.environ.get("YOUTUBE_COOKIES_BROWSER", "")
+    # Support passing cookies as env var content (for Railway/Docker secrets)
+    cookies_env_content = os.environ.get("YOUTUBE_COOKIES_CONTENT", "")
+
+    if not cookies_file:
+        # Auto-search common locations
+        search_paths = [
+            Path(__file__).parent.parent / "cookies.txt",      # backend/cookies.txt (local dev)
+            Path("/app/cookies.txt"),                           # Docker /app/cookies.txt
+            Path("/app/storage/cookies.txt"),                   # Railway volume
+        ]
+        for p in search_paths:
+            if p.is_file():
+                # Validate the cookie file is a text file, not binary/corrupted
+                try:
+                    content = p.read_text(encoding="utf-8", errors="strict")
+                    if "youtube.com" in content.lower() or "# Netscape HTTP Cookie File" in content:
+                        cookies_file = str(p)
+                        break
+                    else:
+                        logger.warning(f"Cookie file {p} exists but doesn't appear valid — skipping")
+                except (UnicodeDecodeError, OSError):
+                    logger.warning(f"Cookie file {p} is corrupted/binary — skipping")
+
+    # If no cookie file found but YOUTUBE_COOKIES_CONTENT env var is set,
+    # write it to a temp file (allows passing cookies via Railway env vars)
+    if not cookies_file and cookies_env_content:
+        try:
+            tmp_cookie_path = Path(tempfile.gettempdir()) / "yt_cookies.txt"
+            tmp_cookie_path.write_text(cookies_env_content, encoding="utf-8")
+            cookies_file = str(tmp_cookie_path)
+            logger.info("Using YouTube cookies from YOUTUBE_COOKIES_CONTENT env var")
+        except Exception as e:
+            logger.warning(f"Failed to write cookies from env var: {e}")
+
+    if cookies_file and Path(cookies_file).is_file():
+        ydl_opts["cookiefile"] = cookies_file
+        logger.info(f"Using YouTube cookies file: {cookies_file}")
+    elif cookies_browser:
+        ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
+        logger.info(f"Using YouTube cookies from browser: {cookies_browser}")
+    else:
+        logger.warning(
+            "⚠️ No YouTube cookies found! YouTube will likely block downloads. "
+            "Fix: 1) Run 'python scripts/export_youtube_cookies.py' locally, "
+            "2) Copy cookies.txt to /app/storage/cookies.txt on Railway, OR "
+            "3) Set YOUTUBE_COOKIES_CONTENT env var with cookie file contents."
+        )
 
     import asyncio
     loop = asyncio.get_running_loop()
