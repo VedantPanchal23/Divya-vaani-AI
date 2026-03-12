@@ -70,3 +70,9 @@ Input/
 backend/audit_output*.txt
 backend/audit_results*.txt
 backend/audit_clean*.txt
+
+# YouTube cookies (contains auth secrets)
+cookies.txt
+cookies.txt.txt
+backend/cookies.txt
+backend/cookies.txt.txt
