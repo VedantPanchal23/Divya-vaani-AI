@@ -216,11 +216,21 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com"
+    # CSP: allow YouTube embeds, thumbnails, Google Fonts, and Railway API calls
+    csp_parts = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https: http:",
+        "media-src 'self' blob: data: https://www.youtube.com https://*.googlevideo.com",
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
+        "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://*.railway.app https://www.youtube.com https://*.googlevideo.com",
+    ]
+    response.headers["Content-Security-Policy"] = "; ".join(csp_parts)
     if not settings.DEBUG:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
