@@ -68,6 +68,7 @@ pydub>=0.25.1,<1.0.0
 # YouTube Download
 # ------------------------
 yt-dlp>=2024.1.0
+youtube-transcript-api>=0.6.0
 
 # ------------------------
 # Text-to-Speech (Optimized for Speed)
