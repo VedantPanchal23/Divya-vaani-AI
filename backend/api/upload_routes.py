@@ -314,10 +314,12 @@ async def _process_youtube_upload(file_id: str, url: str, custom_title: str | No
             logger.info(f"✅ Found existing YouTube captions for {video_yt_id}!")
             chunks = []
             for i, item in enumerate(captions):
-                text = item.get('text', '').strip()
+                # Handle both dicts (older versions) and FetchedTranscriptSnippet objects (v1.2+)
+                text = item.get('text', '') if isinstance(item, dict) else getattr(item, 'text', '')
+                text = text.strip()
                 if text:
-                    start = float(item.get('start', 0))
-                    duration = float(item.get('duration', 0))
+                    start = float(item.get('start', 0) if isinstance(item, dict) else getattr(item, 'start', 0))
+                    duration = float(item.get('duration', 0) if isinstance(item, dict) else getattr(item, 'duration', 0))
                     chunks.append(TranscriptChunk(
                         id=f"{file_id}_{i}",
                         text=text.replace('\n', ' '),
