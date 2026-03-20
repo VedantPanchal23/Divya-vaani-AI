@@ -285,20 +285,80 @@ async def upload_youtube(
 async def _process_youtube_upload(file_id: str, url: str, custom_title: str | None):
     """Background task: download YouTube audio, then run standard processing pipeline."""
     try:
-        _status[file_id]["step"] = "downloading"
-        _status[file_id]["message"] = "Downloading audio from YouTube..."
+        from youtube_transcript_api import YouTubeTranscriptApi
+        from data.schema import Transcript, TranscriptChunk
+        from datetime import datetime
+        import asyncio
+
+        video_yt_id = _extract_video_id(url)
+        yt_title = custom_title or f"YouTube Video ({video_yt_id})"
+        yt_thumbnail = f"https://i.ytimg.com/vi/{video_yt_id}/hqdefault.jpg"
+        yt_duration = 0
+        transcript_obj = None
+        mp3_path = None
+
+        _status[file_id]["step"] = "checking_captions"
+        _status[file_id]["message"] = "Checking for existing YouTube captions..."
         _status[file_id]["progress"] = 5
 
-        mp3_path, info = await _download_youtube_audio(url, settings.UPLOAD_DIR)
+        # 1. Try to fetch captions directly (bypasses bot detection & saves time)
+        try:
+            loop = asyncio.get_running_loop()
+            def fetch_captions():
+                api = YouTubeTranscriptApi()
+                t_list = api.list(video_yt_id)
+                return t_list.find_transcript(['hi', 'en']).fetch()
 
-        # Use custom title, or YouTube title, or fallback
-        yt_title = custom_title or info.get("title") or info.get("fulltitle") or f"YouTube-{file_id}"
-        yt_thumbnail = info.get("thumbnail") or ""
-        yt_duration = info.get("duration") or 0
-        youtube_id = info.get("id") or _extract_video_id(url)
+            captions = await loop.run_in_executor(None, fetch_captions)
+            
+            logger.info(f"✅ Found existing YouTube captions for {video_yt_id}!")
+            chunks = []
+            for i, item in enumerate(captions):
+                text = item.get('text', '').strip()
+                if text:
+                    start = float(item.get('start', 0))
+                    duration = float(item.get('duration', 0))
+                    chunks.append(TranscriptChunk(
+                        id=f"{file_id}_{i}",
+                        text=text.replace('\n', ' '),
+                        start_time=start,
+                        end_time=start + duration
+                    ))
+            
+            if chunks:
+                full_text = " ".join([c.text for c in chunks])
+                yt_duration = chunks[-1].end_time
+                transcript_obj = Transcript(
+                    id=file_id,
+                    filename=f"youtube-{video_yt_id}.txt",
+                    title=yt_title,
+                    chunks=chunks,
+                    duration=yt_duration,
+                    created_at=datetime.now(),
+                    full_text=full_text
+                )
+                # Save it so it's loaded correctly
+                from core import transcriber
+                transcriber._save_transcript(transcript_obj)
 
-        logger.info(f"✅ YouTube download complete: '{yt_title}' ({yt_duration}s) → {mp3_path.name}")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch YouTube captions directly: {e}. Falling back to audio download & transcription...")
 
+        # 2. If no captions found, fall back to downloading audio and using Whisper
+        if not transcript_obj:
+            _status[file_id]["step"] = "downloading"
+            _status[file_id]["message"] = "Downloading audio from YouTube..."
+            _status[file_id]["progress"] = 10
+
+            mp3_path, info = await _download_youtube_audio(url, settings.UPLOAD_DIR)
+
+            # Update metadata from yt-dlp if available
+            yt_title = custom_title or info.get("title") or info.get("fulltitle") or yt_title
+            yt_thumbnail = info.get("thumbnail") or yt_thumbnail
+            yt_duration = info.get("duration") or 0
+
+            logger.info(f"✅ YouTube download complete: '{yt_title}' ({yt_duration}s) → {mp3_path.name}")
+            
         _status[file_id]["step"] = "transcribing"
         _status[file_id]["message"] = f"Transcribing: {yt_title}..."
         _status[file_id]["progress"] = 10
@@ -306,12 +366,13 @@ async def _process_youtube_upload(file_id: str, url: str, custom_title: str | No
         # Run the standard processing pipeline (same as file upload)
         await _process_upload_with_metadata(
             file_id=file_id, 
-            file_path=mp3_path, 
+            file_path=mp3_path, # might be None if we skipped download
             title=yt_title, 
             thumbnail=yt_thumbnail, 
             duration=yt_duration, 
             source_url=url,
-            youtube_id=youtube_id
+            youtube_id=video_yt_id,
+            pretranscribed_obj=transcript_obj
         )
 
     except Exception as e:
@@ -326,19 +387,23 @@ async def _process_youtube_upload(file_id: str, url: str, custom_title: str | No
 
 
 async def _process_upload_with_metadata(
-    file_id: str, file_path: Path, title: str,
-    thumbnail: str = "", duration: float = 0, source_url: str = "", youtube_id: str = None
+    file_id: str, file_path: Path | None, title: str,
+    thumbnail: str = "", duration: float = 0, source_url: str = "", youtube_id: str | None = None,
+    pretranscribed_obj=None
 ):
     """Extended processing pipeline with YouTube metadata support."""
     try:
-        _status[file_id]["step"] = "transcribing"
-        _status[file_id]["message"] = "Transcribing audio..."
-
         def progress_callback(current, total, msg):
             _status[file_id]["progress"] = int(10 + (current / total) * 40)
             _status[file_id]["message"] = msg
 
-        transcript = await transcriber.transcribe_audio(file_id, file_path, title, progress_callback)
+        if pretranscribed_obj:
+            # We already have the transcript from youtube-transcript-api! Skip transcribing.
+            transcript = pretranscribed_obj
+        else:
+            _status[file_id]["step"] = "transcribing"
+            _status[file_id]["message"] = "Transcribing audio..."
+            transcript = await transcriber.transcribe_audio(file_id, file_path, title, progress_callback)
 
         try:
             rag_engine.index_transcript(transcript)
@@ -374,9 +439,9 @@ async def _process_upload_with_metadata(
                 "id": file_id,
                 "title": title,
                 "title_hi": title,
-                "description": f"Source: {source_url}" if source_url else f"Uploaded: {file_path.name}",
-                "description_hi": f"स्रोत: {source_url}" if source_url else f"अपलोड: {file_path.name}",
-                "thumbnail": thumbnail or f"/api/thumbnail/{file_id}",
+                "description": f"Source: {source_url}" if source_url else f"Uploaded: {(file_path.name if file_path else 'Captions directly from YouTube')}",
+                "description_hi": f"स्रोत: {source_url}" if source_url else f"अपलोड: {(file_path.name if file_path else 'Captions directly from YouTube')}",
+                "thumbnail": thumbnail or (f"/api/thumbnail/{file_id}" if file_path else ""),
                 "video_url": source_url or "",
                 "youtube_id": youtube_id,
                 "duration": duration or transcript.duration,
